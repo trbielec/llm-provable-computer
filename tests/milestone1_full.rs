@@ -184,7 +184,10 @@ fn shipped_workflow_cases() -> Vec<WorkflowCase> {
             program_name: "soft_attention_memory_hard_softmax",
             config: TransformerVmConfig {
                 num_layers: 2,
-                attention_mode: Attention2DMode::HardSoftmax { temperature: 10.0 },
+                attention_mode: Attention2DMode::HardSoftmax {
+                    temperature: 10.0,
+                    query: [1.0, 0.0],
+                },
                 ..TransformerVmConfig::default()
             },
             expected_acc: 4,
@@ -195,7 +198,7 @@ fn shipped_workflow_cases() -> Vec<WorkflowCase> {
             program_name: "soft_attention_memory_softmax",
             config: TransformerVmConfig {
                 num_layers: 2,
-                attention_mode: Attention2DMode::Softmax,
+                attention_mode: Attention2DMode::Softmax { query: [1.0, 0.0] },
                 ..TransformerVmConfig::default()
             },
             expected_acc: 9,
@@ -438,7 +441,10 @@ fn milestone1_cli_workflow_exports_verifies_and_replays_fibonacci() {
 
     let metadata = load_onnx_program_metadata(&export_dir.join("metadata.json")).expect("metadata");
     assert_eq!(metadata.config.num_layers, 3);
-    assert_eq!(metadata.config.attention_mode, Attention2DMode::AverageHard);
+    assert_eq!(
+        metadata.config.attention_mode,
+        Attention2DMode::AverageHard { query: [1.0, 0.0] }
+    );
     assert_eq!(
         metadata.instructions.len(),
         metadata.program.instructions().len()

@@ -1,10 +1,14 @@
+use std::thread;
 /// STARK prover and verifier.
 /// Ported from the stark-anatomy Python reference implementation.
+use std::time::Instant;
+
 use blake2::{Blake2b512, Digest};
+use serde::{Deserialize, Serialize};
 
 use super::field::FieldElement;
 use super::fri::Fri;
-use super::merkle::Merkle;
+use super::merkle::{Merkle, MerkleTree};
 use super::multivariate::MPolynomial;
 use super::polynomial::Polynomial;
 use super::proof_stream::{ProofObject, ProofStream};
@@ -13,6 +17,32 @@ fn blake2b_hash(data: &[u8]) -> Vec<u8> {
     let mut hasher = Blake2b512::new();
     hasher.update(data);
     hasher.finalize().to_vec()
+}
+
+fn available_worker_count(task_count: usize) -> usize {
+    thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1)
+        .min(task_count.max(1))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct StarkProofProfile {
+    pub randomizer_rows_micros: u64,
+    pub trace_interpolation_micros: u64,
+    pub boundary_quotient_commit_micros: u64,
+    pub transition_quotient_micros: u64,
+    pub randomizer_commit_micros: u64,
+    pub combination_micros: u64,
+    pub fri_prove_micros: u64,
+    pub opening_micros: u64,
+    pub total_micros: u64,
+}
+
+impl StarkProofProfile {
+    fn micros(start: Instant) -> u64 {
+        start.elapsed().as_micros().try_into().unwrap_or(u64::MAX)
+    }
 }
 
 pub struct Stark {
@@ -202,9 +232,22 @@ impl Stark {
         transition_constraints: &[MPolynomial],
         boundary: &[(usize, usize, FieldElement)],
     ) -> Vec<u8> {
+        self.prove_with_profile(trace, transition_constraints, boundary)
+            .0
+    }
+
+    pub fn prove_with_profile(
+        &self,
+        trace: &[Vec<FieldElement>],
+        transition_constraints: &[MPolynomial],
+        boundary: &[(usize, usize, FieldElement)],
+    ) -> (Vec<u8>, StarkProofProfile) {
+        let total_start = Instant::now();
         let mut proof_stream = ProofStream::new();
+        let mut profile = StarkProofProfile::default();
 
         // Concatenate randomizers
+        let phase_start = Instant::now();
         let mut trace = trace.to_vec();
         for _ in 0..self.num_randomizers {
             let random_row: Vec<FieldElement> = (0..self.num_registers)
@@ -221,18 +264,52 @@ impl Stark {
                 .collect();
             trace.push(random_row);
         }
+        profile.randomizer_rows_micros = StarkProofProfile::micros(phase_start);
 
         // Interpolate
+        let phase_start = Instant::now();
         let trace_domain: Vec<FieldElement> = (0..trace.len())
             .map(|i| self.omicron.pow(i as u128))
             .collect();
-        let mut trace_polynomials = Vec::new();
-        for s in 0..self.num_registers {
-            let single_trace: Vec<FieldElement> = (0..trace.len()).map(|c| trace[c][s]).collect();
-            trace_polynomials.push(Polynomial::interpolate_domain(&trace_domain, &single_trace));
-        }
+        let worker_count = available_worker_count(self.num_registers);
+        let trace_polynomials = if worker_count <= 1 || self.num_registers < 8 {
+            let mut trace_polynomials = Vec::new();
+            for s in 0..self.num_registers {
+                let single_trace: Vec<FieldElement> =
+                    (0..trace.len()).map(|c| trace[c][s]).collect();
+                trace_polynomials
+                    .push(Polynomial::interpolate_domain(&trace_domain, &single_trace));
+            }
+            trace_polynomials
+        } else {
+            let chunk_size = self.num_registers.div_ceil(worker_count);
+            let chunks = thread::scope(|scope| {
+                let mut handles = Vec::new();
+                for start in (0..self.num_registers).step_by(chunk_size) {
+                    let end = (start + chunk_size).min(self.num_registers);
+                    let trace = &trace;
+                    let trace_domain = &trace_domain;
+                    handles.push(scope.spawn(move || {
+                        let mut chunk = Vec::with_capacity(end - start);
+                        for s in start..end {
+                            let single_trace: Vec<FieldElement> =
+                                (0..trace.len()).map(|c| trace[c][s]).collect();
+                            chunk.push(Polynomial::interpolate_domain(trace_domain, &single_trace));
+                        }
+                        chunk
+                    }));
+                }
+                handles
+                    .into_iter()
+                    .flat_map(|handle| handle.join().expect("trace interpolation worker panicked"))
+                    .collect::<Vec<_>>()
+            });
+            chunks
+        };
+        profile.trace_interpolation_micros = StarkProofProfile::micros(phase_start);
 
         // Subtract boundary interpolants and divide out boundary zerofiers
+        let phase_start = Instant::now();
         let boundary_interpolants = self.boundary_interpolants(boundary);
         let boundary_zerofiers = self.boundary_zerofiers(boundary);
         let boundary_quotients: Vec<Polynomial> = trace_polynomials
@@ -245,16 +322,69 @@ impl Stark {
 
         // Commit to boundary quotients
         let fri_domain = self.fri.eval_domain();
-        let mut boundary_quotient_codewords = Vec::new();
-        for quotient in boundary_quotients.iter().take(self.num_registers) {
-            let codeword = quotient.evaluate_domain(&fri_domain);
-            let codeword_bytes: Vec<Vec<u8>> = codeword.iter().map(|e| e.to_bytes_str()).collect();
-            let merkle_root = Merkle::commit(&codeword_bytes);
-            proof_stream.push(ProofObject::Bytes(merkle_root));
-            boundary_quotient_codewords.push(codeword);
-        }
+        let (boundary_quotient_codewords, boundary_quotient_trees) = if worker_count <= 1
+            || self.num_registers < 8
+        {
+            let mut boundary_quotient_codewords = Vec::new();
+            let mut boundary_quotient_trees = Vec::new();
+            for quotient in boundary_quotients.iter().take(self.num_registers) {
+                let codeword = quotient.evaluate_domain(&fri_domain);
+                let codeword_bytes: Vec<Vec<u8>> =
+                    codeword.iter().map(|e| e.to_bytes_str()).collect();
+                let merkle_tree = MerkleTree::from_data(&codeword_bytes);
+                proof_stream.push(ProofObject::Bytes(merkle_tree.root().to_vec()));
+                boundary_quotient_codewords.push(codeword);
+                boundary_quotient_trees.push(merkle_tree);
+            }
+            (boundary_quotient_codewords, boundary_quotient_trees)
+        } else {
+            let chunk_size = self.num_registers.div_ceil(worker_count);
+            let mut codewords = vec![None; self.num_registers];
+            let mut trees = vec![None; self.num_registers];
+            let chunks = thread::scope(|scope| {
+                let mut handles = Vec::new();
+                for start in (0..self.num_registers).step_by(chunk_size) {
+                    let end = (start + chunk_size).min(self.num_registers);
+                    let boundary_quotients = &boundary_quotients;
+                    let fri_domain = &fri_domain;
+                    handles.push(scope.spawn(move || {
+                        let mut chunk = Vec::with_capacity(end - start);
+                        for index in start..end {
+                            let codeword = boundary_quotients[index].evaluate_domain(fri_domain);
+                            let codeword_bytes: Vec<Vec<u8>> =
+                                codeword.iter().map(|e| e.to_bytes_str()).collect();
+                            let merkle_tree = MerkleTree::from_data(&codeword_bytes);
+                            chunk.push((index, codeword, merkle_tree));
+                        }
+                        chunk
+                    }));
+                }
+                handles
+                    .into_iter()
+                    .flat_map(|handle| handle.join().expect("boundary quotient worker panicked"))
+                    .collect::<Vec<_>>()
+            });
+            for (index, codeword, merkle_tree) in chunks {
+                codewords[index] = Some(codeword);
+                trees[index] = Some(merkle_tree);
+            }
+            let boundary_quotient_codewords = codewords
+                .into_iter()
+                .map(|codeword| codeword.expect("missing boundary quotient codeword"))
+                .collect::<Vec<_>>();
+            let boundary_quotient_trees = trees
+                .into_iter()
+                .map(|tree| tree.expect("missing boundary quotient tree"))
+                .collect::<Vec<_>>();
+            for tree in &boundary_quotient_trees {
+                proof_stream.push(ProofObject::Bytes(tree.root().to_vec()));
+            }
+            (boundary_quotient_codewords, boundary_quotient_trees)
+        };
+        profile.boundary_quotient_commit_micros = StarkProofProfile::micros(phase_start);
 
         // Symbolically evaluate transition constraints
+        let phase_start = Instant::now();
         let x = Polynomial::new(vec![FieldElement::zero(), FieldElement::one()]);
         let mut point: Vec<Polynomial> = vec![x.clone()];
         for tp in &trace_polynomials {
@@ -274,8 +404,10 @@ impl Stark {
             .iter()
             .map(|tp| tp.clone() / transition_zerofier.clone())
             .collect();
+        profile.transition_quotient_micros = StarkProofProfile::micros(phase_start);
 
         // Commit to randomizer polynomial
+        let phase_start = Instant::now();
         let max_degree = self.max_degree(transition_constraints);
         let randomizer_polynomial = Polynomial::new(
             (0..=max_degree as usize)
@@ -290,10 +422,12 @@ impl Stark {
             .iter()
             .map(|e| e.to_bytes_str())
             .collect();
-        let randomizer_root = Merkle::commit(&randomizer_bytes);
-        proof_stream.push(ProofObject::Bytes(randomizer_root));
+        let randomizer_tree = MerkleTree::from_data(&randomizer_bytes);
+        proof_stream.push(ProofObject::Bytes(randomizer_tree.root().to_vec()));
+        profile.randomizer_commit_micros = StarkProofProfile::micros(phase_start);
 
         // Get weights for nonlinear combination
+        let phase_start = Instant::now();
         let num_weights = 1 + 2 * transition_quotients.len() + 2 * boundary_quotients.len();
         let weights = self.sample_weights(num_weights, &proof_stream.prover_fiat_shamir());
 
@@ -322,11 +456,15 @@ impl Stark {
 
         // Compute matching codeword
         let combined_codeword = combination.evaluate_domain(&fri_domain);
+        profile.combination_micros = StarkProofProfile::micros(phase_start);
 
         // Prove low degree of combination polynomial
+        let phase_start = Instant::now();
         let indices = self.fri.prove(&combined_codeword, &mut proof_stream);
+        profile.fri_prove_micros = StarkProofProfile::micros(phase_start);
 
         // Process indices
+        let phase_start = Instant::now();
         let mut duplicated_indices: Vec<usize> = indices.clone();
         for &i in &indices {
             duplicated_indices.push((i + self.expansion_factor) % self.fri.domain_length);
@@ -339,23 +477,27 @@ impl Stark {
         quadrupled_indices.dedup();
 
         // Open indicated positions in the boundary quotient codewords
-        for bqc in &boundary_quotient_codewords {
-            let bqc_bytes: Vec<Vec<u8>> = bqc.iter().map(|e| e.to_bytes_str()).collect();
-            for &i in &quadrupled_indices {
+        for (bqc, tree) in boundary_quotient_codewords
+            .iter()
+            .zip(boundary_quotient_trees.iter())
+        {
+            let paths = tree.open_many(&quadrupled_indices);
+            for (&i, path) in quadrupled_indices.iter().zip(paths.into_iter()) {
                 proof_stream.push(ProofObject::Element(bqc[i]));
-                let path = Merkle::open(i, &bqc_bytes);
                 proof_stream.push(ProofObject::Path(path));
             }
         }
 
         // Open indicated positions in the randomizer
-        for &i in &quadrupled_indices {
+        let randomizer_paths = randomizer_tree.open_many(&quadrupled_indices);
+        for (&i, path) in quadrupled_indices.iter().zip(randomizer_paths.into_iter()) {
             proof_stream.push(ProofObject::Element(randomizer_codeword[i]));
-            let path = Merkle::open(i, &randomizer_bytes);
             proof_stream.push(ProofObject::Path(path));
         }
+        profile.opening_micros = StarkProofProfile::micros(phase_start);
+        profile.total_micros = StarkProofProfile::micros(total_start);
 
-        proof_stream.serialize()
+        (proof_stream.serialize(), profile)
     }
 
     /// STARK verifier.

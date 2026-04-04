@@ -204,6 +204,15 @@ impl RescuePrime {
         state[0]
     }
 
+    /// Rescue-Prime pair hash for field-native Merkle and transcript backends.
+    pub fn hash_pair(&self, left: FieldElement, right: FieldElement) -> FieldElement {
+        let mut state = [left, right];
+        for round in 0..self.n {
+            self.apply_round(&mut state, round);
+        }
+        state[0]
+    }
+
     /// Compute the algebraic execution trace.
     pub fn trace(&self, input_element: FieldElement) -> Vec<Vec<FieldElement>> {
         let mut trace = Vec::with_capacity(self.n + 1);
@@ -331,5 +340,13 @@ mod tests {
         let trace = rp.trace(a);
         assert_eq!(trace[0][0], a);
         assert_eq!(trace.last().unwrap()[0], b);
+    }
+
+    #[test]
+    fn hash_pair_is_deterministic() {
+        let rp = RescuePrime::new();
+        let left = FieldElement::new(1);
+        let right = FieldElement::new(2);
+        assert_eq!(rp.hash_pair(left, right), rp.hash_pair(left, right));
     }
 }

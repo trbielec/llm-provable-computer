@@ -117,13 +117,13 @@ impl HullKvCache {
     /// full history so they can blend values by score.
     pub fn query_value(&self, query: [f32; 2], mode: &Attention2DMode) -> Result<Vec<f32>> {
         match mode {
-            Attention2DMode::AverageHard => {
+            Attention2DMode::AverageHard { .. } => {
                 self.query_argmax(query).map(|(_, value)| value.to_vec())
             }
-            Attention2DMode::HardSoftmax { temperature } => {
+            Attention2DMode::HardSoftmax { temperature, .. } => {
                 self.query_weighted(query, *temperature)
             }
-            Attention2DMode::Softmax => self.query_weighted(query, 1.0),
+            Attention2DMode::Softmax { .. } => self.query_weighted(query, 1.0),
         }
     }
 
@@ -453,7 +453,10 @@ mod tests {
         cache.insert([10.0, 0.0], &[10.0]);
 
         let value = cache
-            .query_value([1.0, 0.0], &Attention2DMode::AverageHard)
+            .query_value(
+                [1.0, 0.0],
+                &Attention2DMode::AverageHard { query: [1.0, 0.0] },
+            )
             .unwrap();
         assert_eq!(value, vec![10.0], "average-hard should return argmax point");
     }
@@ -465,7 +468,7 @@ mod tests {
         cache.insert([10.0, 0.0], &[10.0]);
 
         let value = cache
-            .query_value([1.0, 0.0], &Attention2DMode::Softmax)
+            .query_value([1.0, 0.0], &Attention2DMode::Softmax { query: [1.0, 0.0] })
             .unwrap();
         // Softmax blends, so result should be between 0 and 10
         assert!(

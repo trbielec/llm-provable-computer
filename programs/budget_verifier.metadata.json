@@ -1,0 +1,20 @@
+{
+  "output": {
+    "status_register": 6,
+    "reason_register": 7
+  },
+  "reasons": [
+    {
+      "code": 1,
+      "constraint_id": "C1",
+      "label": "budget_cap_exceeded",
+      "description": "Total spend must not exceed budget"
+    },
+    {
+      "code": 2,
+      "constraint_id": "C2",
+      "label": "rd_ratio_mismatch",
+      "description": "R&D must be exactly twice marketing"
+    }
+  ]
+}

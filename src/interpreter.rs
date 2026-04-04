@@ -8,7 +8,7 @@ use crate::engine::{
 use crate::error::{Result, VmError};
 use crate::instruction::{Instruction, Program};
 use crate::memory::AddressedMemory;
-use crate::state::MachineState;
+use crate::state::{MachineState, Word};
 
 pub type NativeExecutionResult = ExecutionResult;
 pub type NativeTraceEntry = ExecutionTraceEntry;
@@ -113,19 +113,19 @@ impl NativeInterpreter {
         &self.memory
     }
 
-    fn read_memory(&self, address: u8) -> Result<i16> {
+    fn read_memory(&self, address: u8) -> Result<Word> {
         self.memory.load_with_mode(address, &self.attention_mode)
     }
 
-    fn read_stack_top(&self) -> Result<i16> {
+    fn read_stack_top(&self) -> Result<Word> {
         self.read_memory(self.state.sp)
     }
 
-    fn write_memory(&mut self, address: u8, value: i16) -> Result<()> {
+    fn write_memory(&mut self, address: u8, value: Word) -> Result<()> {
         self.memory.store(address, value, self.step_count + 1)
     }
 
-    fn push_value(&mut self, value: i16) -> Result<u8> {
+    fn push_value(&mut self, value: Word) -> Result<u8> {
         let address = self.state.sp - 1;
         self.write_memory(address, value)?;
         Ok(address)
@@ -138,11 +138,11 @@ impl NativeInterpreter {
         match instruction {
             Instruction::Nop => advance(&mut next_state, next_pc),
             Instruction::LoadImmediate(value) => {
-                advance_with_acc(&mut next_state, next_pc, i64::from(value), false);
+                advance_with_acc(&mut next_state, next_pc, i128::from(value), false);
             }
             Instruction::Load(address) => {
                 let value = self.read_memory(address)?;
-                advance_with_acc(&mut next_state, next_pc, i64::from(value), false);
+                advance_with_acc(&mut next_state, next_pc, i128::from(value), false);
             }
             Instruction::Store(address) => {
                 self.write_memory(address, self.state.acc)?;
@@ -155,80 +155,80 @@ impl NativeInterpreter {
             }
             Instruction::Pop => {
                 let value = self.read_stack_top()?;
-                advance_with_acc(&mut next_state, next_pc, i64::from(value), false);
+                advance_with_acc(&mut next_state, next_pc, i128::from(value), false);
                 next_state.sp = self.state.sp.saturating_add(1);
             }
             Instruction::AddImmediate(value) => {
-                let raw = i64::from(self.state.acc) + i64::from(value);
+                let raw = i128::from(self.state.acc) + i128::from(value);
                 advance_with_acc(&mut next_state, next_pc, raw, overflowed(raw));
             }
             Instruction::AddMemory(address) => {
                 let rhs = self.read_memory(address)?;
-                let raw = i64::from(self.state.acc) + i64::from(rhs);
+                let raw = i128::from(self.state.acc) + i128::from(rhs);
                 advance_with_acc(&mut next_state, next_pc, raw, overflowed(raw));
             }
             Instruction::SubImmediate(value) => {
-                let raw = i64::from(self.state.acc) - i64::from(value);
+                let raw = i128::from(self.state.acc) - i128::from(value);
                 advance_with_acc(&mut next_state, next_pc, raw, overflowed(raw));
             }
             Instruction::SubMemory(address) => {
                 let rhs = self.read_memory(address)?;
-                let raw = i64::from(self.state.acc) - i64::from(rhs);
+                let raw = i128::from(self.state.acc) - i128::from(rhs);
                 advance_with_acc(&mut next_state, next_pc, raw, overflowed(raw));
             }
             Instruction::MulImmediate(value) => {
-                let raw = i64::from(self.state.acc) * i64::from(value);
+                let raw = i128::from(self.state.acc) * i128::from(value);
                 advance_with_acc(&mut next_state, next_pc, raw, overflowed(raw));
             }
             Instruction::MulMemory(address) => {
                 let rhs = self.read_memory(address)?;
-                let raw = i64::from(self.state.acc) * i64::from(rhs);
+                let raw = i128::from(self.state.acc) * i128::from(rhs);
                 advance_with_acc(&mut next_state, next_pc, raw, overflowed(raw));
             }
             Instruction::AndImmediate(value) => {
-                let raw = i64::from(self.state.acc & value);
+                let raw = i128::from(self.state.acc & value);
                 advance_with_acc(&mut next_state, next_pc, raw, false);
             }
             Instruction::AndMemory(address) => {
                 let rhs = self.read_memory(address)?;
-                let raw = i64::from(self.state.acc & rhs);
+                let raw = i128::from(self.state.acc & rhs);
                 advance_with_acc(&mut next_state, next_pc, raw, false);
             }
             Instruction::OrImmediate(value) => {
-                let raw = i64::from(self.state.acc | value);
+                let raw = i128::from(self.state.acc | value);
                 advance_with_acc(&mut next_state, next_pc, raw, false);
             }
             Instruction::OrMemory(address) => {
                 let rhs = self.read_memory(address)?;
-                let raw = i64::from(self.state.acc | rhs);
+                let raw = i128::from(self.state.acc | rhs);
                 advance_with_acc(&mut next_state, next_pc, raw, false);
             }
             Instruction::XorImmediate(value) => {
-                let raw = i64::from(self.state.acc ^ value);
+                let raw = i128::from(self.state.acc ^ value);
                 advance_with_acc(&mut next_state, next_pc, raw, false);
             }
             Instruction::XorMemory(address) => {
                 let rhs = self.read_memory(address)?;
-                let raw = i64::from(self.state.acc ^ rhs);
+                let raw = i128::from(self.state.acc ^ rhs);
                 advance_with_acc(&mut next_state, next_pc, raw, false);
             }
             Instruction::CmpImmediate(value) => {
-                let raw = i64::from(self.state.acc) - i64::from(value);
+                let raw = i128::from(self.state.acc) - i128::from(value);
                 advance_with_acc(&mut next_state, next_pc, raw, self.state.acc < value);
             }
             Instruction::CmpMemory(address) => {
                 let rhs = self.read_memory(address)?;
-                let raw = i64::from(self.state.acc) - i64::from(rhs);
+                let raw = i128::from(self.state.acc) - i128::from(rhs);
                 advance_with_acc(&mut next_state, next_pc, raw, self.state.acc < rhs);
             }
             Instruction::Call(target) => {
-                let address = self.push_value(i16::from(next_pc))?;
+                let address = self.push_value(Word::from(next_pc))?;
                 next_state.sp = address;
                 jump(&mut next_state, target);
             }
             Instruction::Ret => {
                 let value = self.read_stack_top()?;
-                next_state.pc = checked_transition_u8("pc", i64::from(value))?;
+                next_state.pc = checked_transition_u8("pc", value)?;
                 next_state.sp = self.state.sp.saturating_add(1);
                 next_state.halted = false;
             }
@@ -248,6 +248,14 @@ impl NativeInterpreter {
                 } else {
                     target
                 },
+            ),
+            Instruction::JumpIfSign(target) => jump(
+                &mut next_state,
+                if self.state.acc < 0 { target } else { next_pc },
+            ),
+            Instruction::JumpIfNotSign(target) => jump(
+                &mut next_state,
+                if self.state.acc < 0 { next_pc } else { target },
             ),
             Instruction::Halt => next_state.halted = true,
         }
@@ -295,8 +303,8 @@ impl ExecutionEngine for NativeInterpreter {
     }
 }
 
-fn set_acc_result(state: &mut MachineState, raw: i64, carry_flag: bool) {
-    state.acc = raw as i16;
+fn set_acc_result(state: &mut MachineState, raw: i128, carry_flag: bool) {
+    state.acc = saturating_word(raw);
     state.zero_flag = state.acc == 0;
     state.carry_flag = carry_flag;
 }
@@ -306,7 +314,7 @@ fn advance(state: &mut MachineState, next_pc: u8) {
     state.halted = false;
 }
 
-fn advance_with_acc(state: &mut MachineState, next_pc: u8, raw: i64, carry_flag: bool) {
+fn advance_with_acc(state: &mut MachineState, next_pc: u8, raw: i128, carry_flag: bool) {
     set_acc_result(state, raw, carry_flag);
     advance(state, next_pc);
 }
@@ -316,11 +324,15 @@ fn jump(state: &mut MachineState, target: u8) {
     state.halted = false;
 }
 
-fn overflowed(raw: i64) -> bool {
-    raw < i64::from(i16::MIN) || raw > i64::from(i16::MAX)
+fn overflowed(raw: i128) -> bool {
+    raw < i128::from(Word::MIN) || raw > i128::from(Word::MAX)
 }
 
-fn checked_transition_u8(field: &'static str, value: i64) -> Result<u8> {
+fn saturating_word(raw: i128) -> Word {
+    raw.clamp(i128::from(Word::MIN), i128::from(Word::MAX)) as Word
+}
+
+fn checked_transition_u8(field: &'static str, value: Word) -> Result<u8> {
     u8::try_from(value).map_err(|_| VmError::InvalidTransitionField { field, value })
 }
 

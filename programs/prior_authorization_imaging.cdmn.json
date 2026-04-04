@@ -1,0 +1,37 @@
+{
+  "name": "Imaging Prior Authorization Guardrails",
+  "type": "cDMN",
+  "variables": [
+    { "name": "age", "memory": 0 },
+    { "name": "conservative_therapy_days", "memory": 1, "presence_memory": 6 },
+    { "name": "minimum_therapy_days", "memory": 2 },
+    { "name": "red_flag_present", "memory": 3 },
+    { "name": "severe_neurologic_deficit", "memory": 4 },
+    { "name": "symptom_duration_days", "memory": 5 }
+  ],
+  "constraints": [
+    {
+      "id": "PA1",
+      "description": "Adult criteria or a documented red flag must be present",
+      "logic": "(age >= 18) or (red_flag_present == 1)",
+      "reason_code": 401,
+      "reason_label": "adult_or_red_flag_criteria_not_met"
+    },
+    {
+      "id": "PA2",
+      "description": "Medical necessity requires a red flag, neurologic deficit, or sufficient failed conservative therapy",
+      "logic": "(red_flag_present == 1) or (severe_neurologic_deficit == 1) or (conservative_therapy_days >= minimum_therapy_days)",
+      "reason_code": 402,
+      "reason_label": "medical_necessity_not_met",
+      "insufficient_data_reason_code": 403,
+      "insufficient_data_reason_label": "conservative_therapy_history_missing"
+    },
+    {
+      "id": "PA3",
+      "description": "Symptoms must have persisted long enough unless a red flag is documented",
+      "logic": "(symptom_duration_days >= 14) or (red_flag_present == 1)",
+      "reason_code": 404,
+      "reason_label": "symptom_duration_too_short"
+    }
+  ]
+}

@@ -7,7 +7,9 @@ pub use crate::engine::{ExecutionResult, ExecutionTraceEntry};
 use crate::error::Result;
 use crate::instruction::Instruction;
 use crate::memory::AddressedMemory;
-use crate::model::{DispatchInfo, TransformerVm};
+use crate::model::{
+    DispatchInfo, SharedTransformerExecutionWitness, SharedTransformerStepWitness, TransformerVm,
+};
 use crate::state::MachineState;
 
 #[derive(Debug, Clone)]
@@ -61,6 +63,53 @@ impl ExecutionRuntime {
         Ok(&self.state)
     }
 
+    pub fn step_with_witness(&mut self) -> Result<SharedTransformerStepWitness> {
+        if execution_complete(&self.state, self.step_count, self.max_steps) {
+            return Ok(SharedTransformerStepWitness {
+                step_number: self.step_count,
+                pre_state: self.state.clone(),
+                input_token: Vec::new(),
+                decoded_state: self.state.clone(),
+                dispatch: self.model.dispatch_info(self.state.pc)?,
+                operand: 0,
+                input_vector: Vec::new(),
+                ff_gate: Vec::new(),
+                ff_value: Vec::new(),
+                ff_hidden: Vec::new(),
+                ff_output: Vec::new(),
+                transition: crate::model::SharedTransformerTransitionWitness {
+                    pc: i64::from(self.state.pc),
+                    acc: self.state.acc,
+                    sp: i64::from(self.state.sp),
+                    zero_flag: self.state.zero_flag,
+                    carry_flag: self.state.carry_flag,
+                    halted: self.state.halted,
+                    memory_write: None,
+                },
+                post_write_state: self.state.clone(),
+                output_token: Vec::new(),
+                final_state: self.state.clone(),
+            });
+        }
+
+        let before = self.state.clone();
+        let witness =
+            self.model
+                .step_with_witness(&self.state, &mut self.memory, self.step_count + 1)?;
+        self.state = witness.final_state.clone();
+        self.step_count += 1;
+        record_execution_step(
+            &mut self.trace,
+            &mut self.events,
+            self.step_count,
+            Some(witness.dispatch.layer_idx),
+            witness.dispatch.instruction,
+            before,
+            &self.state,
+        );
+        Ok(witness)
+    }
+
     pub fn run(&mut self) -> Result<ExecutionResult> {
         let start = Instant::now();
         while !execution_complete(&self.state, self.step_count, self.max_steps) {
@@ -71,6 +120,24 @@ impl ExecutionRuntime {
             self.step_count,
             start.elapsed(),
         ))
+    }
+
+    pub fn run_with_witness(
+        &mut self,
+    ) -> Result<(ExecutionResult, SharedTransformerExecutionWitness)> {
+        let start = Instant::now();
+        let initial_state = self.state.clone();
+        let mut steps = Vec::new();
+        while !execution_complete(&self.state, self.step_count, self.max_steps) {
+            steps.push(self.step_with_witness()?);
+        }
+        let result = build_execution_result(&self.state, self.step_count, start.elapsed());
+        let witness = SharedTransformerExecutionWitness {
+            initial_state,
+            steps,
+            final_state: self.state.clone(),
+        };
+        Ok((result, witness))
     }
 
     pub fn trace(&self) -> &[MachineState] {

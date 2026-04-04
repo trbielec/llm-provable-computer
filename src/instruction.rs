@@ -3,34 +3,37 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, VmError};
+use crate::state::Word;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Instruction {
     Nop,
-    LoadImmediate(i16),
+    LoadImmediate(Word),
     Load(u8),
     Store(u8),
     Push,
     Pop,
-    AddImmediate(i16),
+    AddImmediate(Word),
     AddMemory(u8),
-    SubImmediate(i16),
+    SubImmediate(Word),
     SubMemory(u8),
-    MulImmediate(i16),
+    MulImmediate(Word),
     MulMemory(u8),
-    AndImmediate(i16),
+    AndImmediate(Word),
     AndMemory(u8),
-    OrImmediate(i16),
+    OrImmediate(Word),
     OrMemory(u8),
-    XorImmediate(i16),
+    XorImmediate(Word),
     XorMemory(u8),
-    CmpImmediate(i16),
+    CmpImmediate(Word),
     CmpMemory(u8),
     Call(u8),
     Ret,
     Jump(u8),
     JumpIfZero(u8),
     JumpIfNotZero(u8),
+    JumpIfSign(u8),
+    JumpIfNotSign(u8),
     Halt,
 }
 
@@ -62,6 +65,8 @@ impl Instruction {
             Instruction::Jump(_) => "JMP",
             Instruction::JumpIfZero(_) => "JZ",
             Instruction::JumpIfNotZero(_) => "JNZ",
+            Instruction::JumpIfSign(_) => "JS",
+            Instruction::JumpIfNotSign(_) => "JNS",
             Instruction::Halt => "HALT",
         }
     }
@@ -95,7 +100,9 @@ impl fmt::Display for Instruction {
             | Instruction::Call(address)
             | Instruction::Jump(address)
             | Instruction::JumpIfZero(address)
-            | Instruction::JumpIfNotZero(address) => {
+            | Instruction::JumpIfNotZero(address)
+            | Instruction::JumpIfSign(address)
+            | Instruction::JumpIfNotSign(address) => {
                 write!(f, "{} {}", self.mnemonic(), address)
             }
         }
@@ -105,7 +112,7 @@ impl fmt::Display for Instruction {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Program {
     instructions: Vec<Instruction>,
-    initial_memory: Vec<i16>,
+    initial_memory: Vec<Word>,
 }
 
 impl Program {
@@ -116,7 +123,7 @@ impl Program {
         }
     }
 
-    pub fn with_initial_memory(mut self, initial_memory: Vec<i16>) -> Result<Self> {
+    pub fn with_initial_memory(mut self, initial_memory: Vec<Word>) -> Result<Self> {
         if initial_memory.len() > usize::from(u8::MAX) {
             return Err(VmError::InvalidConfig(format!(
                 "memory size {} exceeds the encoded stack/address limit of {} cells",
@@ -161,7 +168,7 @@ impl Program {
         self.initial_memory.len()
     }
 
-    pub fn initial_memory(&self) -> &[i16] {
+    pub fn initial_memory(&self) -> &[Word] {
         &self.initial_memory
     }
 }
@@ -263,6 +270,8 @@ mod tests {
             (Instruction::Jump(0), "JMP"),
             (Instruction::JumpIfZero(0), "JZ"),
             (Instruction::JumpIfNotZero(0), "JNZ"),
+            (Instruction::JumpIfSign(0), "JS"),
+            (Instruction::JumpIfNotSign(0), "JNS"),
             (Instruction::Halt, "HALT"),
         ];
         for (instr, expected) in cases {
@@ -293,6 +302,9 @@ mod tests {
         assert_eq!(format!("{}", Instruction::Store(3)), "STORE 3");
         assert_eq!(format!("{}", Instruction::Jump(10)), "JMP 10");
         assert_eq!(format!("{}", Instruction::JumpIfZero(5)), "JZ 5");
+        assert_eq!(format!("{}", Instruction::JumpIfNotZero(4)), "JNZ 4");
+        assert_eq!(format!("{}", Instruction::JumpIfSign(6)), "JS 6");
+        assert_eq!(format!("{}", Instruction::JumpIfNotSign(2)), "JNS 2");
         assert_eq!(format!("{}", Instruction::Call(8)), "CALL 8");
     }
 }

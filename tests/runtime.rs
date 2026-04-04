@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use llm_provable_computer::{
     decode_state, encode_state, parse_program, Attention2DMode, ExecutionResult, ExecutionRuntime,
-    MachineState, ProgramCompiler, TransformerVmConfig, VmError,
+    MachineState, NativeInterpreter, ProgramCompiler, TransformerVmConfig, VmError, MIN_D_MODEL,
 };
 
 /// Load a `.tvm` fixture, compile with default config, and run.
@@ -28,7 +28,7 @@ fn state_encoding_round_trips() {
         memory: vec![4, 8, 15, 16],
     };
 
-    let token = encode_state(&state, 36).expect("encode");
+    let token = encode_state(&state, MIN_D_MODEL).expect("encode");
     let decoded = decode_state(&token, state.memory.clone()).expect("decode");
     assert_eq!(decoded, state);
 }
@@ -104,7 +104,7 @@ fn counter_program_halts_with_expected_value() {
 }
 
 #[test]
-fn overflow_sets_carry_flag() {
+fn crossing_old_i16_limit_keeps_full_i64_value() {
     let source = r#"
         LOADI 32767
         ADD 1
@@ -117,8 +117,8 @@ fn overflow_sets_carry_flag() {
     let result = runtime.run().expect("run");
 
     assert!(result.halted);
-    assert_eq!(result.final_state.acc, i16::MIN);
-    assert!(result.final_state.carry_flag);
+    assert_eq!(result.final_state.acc, 32_768);
+    assert!(!result.final_state.carry_flag);
 }
 
 #[test]
@@ -209,6 +209,76 @@ fn subtraction_produces_correct_zero_flag() {
     assert!(result.halted);
     assert_eq!(result.final_state.acc, 0);
     assert!(result.final_state.zero_flag);
+}
+
+#[test]
+fn transformer_step_witness_replays_shared_step() {
+    let source = r#"
+        .memory 2
+        LOADI 7
+        HALT
+    "#;
+    let model = ProgramCompiler
+        .compile_source(source, TransformerVmConfig::default())
+        .expect("compile");
+    let mut runtime = ExecutionRuntime::new(model.clone(), 8);
+
+    let witness = runtime.step_with_witness().expect("witnessed step");
+    let replayed = model
+        .replay_step_witness(&witness)
+        .expect("replay witness through shared model");
+
+    assert_eq!(replayed, witness.final_state);
+    assert_eq!(runtime.state(), &witness.final_state);
+    assert!(
+        witness.is_exact_discrete(),
+        "{:?}",
+        witness.exact_domain_violations()
+    );
+}
+
+#[test]
+fn transformer_execution_witness_matches_native_execution() {
+    let source = r#"
+        .memory 4
+        .init 0 41
+        LOAD 0
+        ADD 1
+        STORE 1
+        LOAD 1
+        HALT
+    "#;
+    let model = ProgramCompiler
+        .compile_source(source, TransformerVmConfig::default())
+        .expect("compile");
+    let program = model.program().clone();
+    let attention_mode = model.config().attention_mode.clone();
+
+    let mut runtime = ExecutionRuntime::new(model.clone(), 16);
+    let (result, witness) = runtime.run_with_witness().expect("run with witness");
+
+    assert_eq!(witness.initial_state.memory, program.initial_memory());
+    assert_eq!(witness.final_state, result.final_state);
+    assert_eq!(witness.steps.len(), result.steps);
+    assert!(
+        witness.is_exact_discrete(),
+        "{:?}",
+        witness.exact_domain_violations()
+    );
+
+    let mut replayed_states = Vec::new();
+    for step_witness in &witness.steps {
+        replayed_states.push(
+            model
+                .replay_step_witness(step_witness)
+                .expect("replay witness step"),
+        );
+    }
+    assert_eq!(replayed_states.last().unwrap(), &result.final_state);
+
+    let mut native = NativeInterpreter::new(program, attention_mode, 16);
+    let native_result = native.run().expect("native run");
+    assert_eq!(native_result.final_state, result.final_state);
 }
 
 #[test]
@@ -580,6 +650,32 @@ fn cmpm_instruction_detects_equality() {
 }
 
 #[test]
+fn sign_branch_instructions_follow_accumulator_sign() {
+    let source = r#"
+        LOADI 5
+        SUB 8
+        JS negative
+        LOADI 0
+        HALT
+negative:
+        JNS fail
+        LOADI 1
+        HALT
+fail:
+        LOADI 99
+        HALT
+    "#;
+    let model = ProgramCompiler
+        .compile_source(source, TransformerVmConfig::default())
+        .expect("compile");
+    let mut runtime = ExecutionRuntime::new(model, 16);
+    let result = runtime.run().expect("run");
+
+    assert!(result.halted);
+    assert_eq!(result.final_state.acc, 1);
+}
+
+#[test]
 fn attention_modes_change_memory_read_semantics() {
     let source = std::fs::read_to_string("programs/soft_attention_memory.tvm").expect("fixture");
 
@@ -597,9 +693,12 @@ fn attention_modes_change_memory_read_semantics() {
         runtime.run().expect("run")
     };
 
-    let average_hard = run(Attention2DMode::AverageHard);
-    let softmax = run(Attention2DMode::Softmax);
-    let hard_softmax = run(Attention2DMode::HardSoftmax { temperature: 10.0 });
+    let average_hard = run(Attention2DMode::AverageHard { query: [1.0, 0.0] });
+    let softmax = run(Attention2DMode::Softmax { query: [1.0, 0.0] });
+    let hard_softmax = run(Attention2DMode::HardSoftmax {
+        temperature: 10.0,
+        query: [1.0, 0.0],
+    });
 
     assert_eq!(average_hard.final_state.acc, 10);
     assert_eq!(softmax.final_state.acc, 9);
@@ -612,7 +711,10 @@ fn invalid_hard_softmax_temperature_is_rejected() {
         .compile_source(
             "LOADI 1\nHALT\n",
             TransformerVmConfig {
-                attention_mode: Attention2DMode::HardSoftmax { temperature: 0.0 },
+                attention_mode: Attention2DMode::HardSoftmax {
+                    temperature: 0.0,
+                    query: [1.0, 0.0],
+                },
                 ..TransformerVmConfig::default()
             },
         )

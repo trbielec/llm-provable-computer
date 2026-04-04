@@ -1,4 +1,5 @@
 use ark_ff::{AdditiveGroup, BigInt, Field, Fp128, MontBackend, MontConfig, PrimeField, Zero};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// Finite field arithmetic over the prime field F_p where p = 1 + 407 * 2^119.
 /// Uses ark-ff Montgomery multiplication for fast field operations.
 /// API-compatible wrapper preserving the interface from the manual implementation.
@@ -24,6 +25,25 @@ pub type Fq = Fp128<MontBackend<FqConfig, 2>>;
 /// for fast arithmetic while preserving the original API.
 #[derive(Clone, Copy, Debug, Eq)]
 pub struct FieldElement(pub Fq);
+
+impl Serialize for FieldElement {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u128(self.value())
+    }
+}
+
+impl<'de> Deserialize<'de> for FieldElement {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let v = u128::deserialize(deserializer)?;
+        Ok(FieldElement::new(v))
+    }
+}
 
 // ── helpers ──
 

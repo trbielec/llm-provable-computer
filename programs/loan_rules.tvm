@@ -1,0 +1,246 @@
+# Auto-compiled TVM assembly from DMN decision table
+.memory 21
+
+  LOADI 0
+  STORE 2
+  LOADI 0
+  STORE 3
+  LOADI 0
+  STORE 11
+  LOADI 0
+  STORE 12
+  LOADI 0
+  STORE 13
+  LOADI 0
+  STORE 14
+  LOADI 0
+  STORE 15
+  LOADI 0
+  STORE 16
+  LOADI 0
+  STORE 4
+  LOADI 0
+  STORE 5
+  LOADI 0
+  STORE 6
+  LOADI 0
+  STORE 7
+  LOADI 0
+  STORE 8
+  LOADI 0
+  STORE 9
+  LOADI 0
+  STORE 10
+  # Rule 1: Prime applicant approval
+dmn_rule_0:
+  LOAD 0
+  STORE 17
+  LOADI 750
+  STORE 18
+  LOAD 17
+  SUBM 18
+  JS dmn_rule_1
+  LOAD 1
+  STORE 19
+  LOADI 25000
+  STORE 20
+  LOAD 19
+  SUBM 20
+  JS dmn_rule_1
+  LOAD 7
+  SUB 0
+  JZ dmn_rule_0_match_slot_0
+  JMP dmn_rule_0_match_check_1
+dmn_rule_0_match_slot_0:
+  LOADI 1
+  STORE 8
+  LOADI 1
+  STORE 11
+  LOADI 1
+  STORE 12
+  JMP dmn_rule_0_match_done
+dmn_rule_0_match_check_1:
+  LOAD 7
+  SUB 1
+  JZ dmn_rule_0_match_slot_1
+  JMP dmn_rule_0_match_check_2
+dmn_rule_0_match_slot_1:
+  LOADI 1
+  STORE 9
+  LOADI 1
+  STORE 13
+  LOADI 1
+  STORE 14
+  JMP dmn_rule_0_match_done
+dmn_rule_0_match_check_2:
+  LOAD 7
+  SUB 2
+  JZ dmn_rule_0_match_slot_2
+dmn_rule_0_match_slot_2:
+  LOADI 1
+  STORE 10
+  LOADI 1
+  STORE 15
+  LOADI 1
+  STORE 16
+  JMP dmn_rule_0_match_done
+dmn_rule_0_match_done:
+  LOAD 7
+  ADD 1
+  STORE 7
+  LOADI 1
+  STORE 2
+  LOADI 1
+  STORE 3
+  LOADI 1
+  STORE 4
+  LOADI 1
+  STORE 5
+  LOADI 1
+  STORE 6
+  HALT
+dmn_rule_0_insufficient:
+  LOADI 0
+  STORE 2
+  LOADI 0
+  STORE 3
+  LOADI 0
+  STORE 4
+  LOADI -2
+  STORE 5
+  LOADI 1
+  STORE 6
+  HALT
+  # Rule 2: Standard applicant approval
+dmn_rule_1:
+  LOAD 0
+  STORE 17
+  LOADI 650
+  STORE 18
+  LOAD 17
+  SUBM 18
+  JS dmn_default_rule
+  LOAD 1
+  STORE 19
+  LOADI 30000
+  STORE 20
+  LOAD 19
+  SUBM 20
+  JS dmn_default_rule
+  LOAD 7
+  SUB 0
+  JZ dmn_rule_1_match_slot_0
+  JMP dmn_rule_1_match_check_1
+dmn_rule_1_match_slot_0:
+  LOADI 2
+  STORE 8
+  LOADI 1
+  STORE 11
+  LOADI 2
+  STORE 12
+  JMP dmn_rule_1_match_done
+dmn_rule_1_match_check_1:
+  LOAD 7
+  SUB 1
+  JZ dmn_rule_1_match_slot_1
+  JMP dmn_rule_1_match_check_2
+dmn_rule_1_match_slot_1:
+  LOADI 2
+  STORE 9
+  LOADI 1
+  STORE 13
+  LOADI 2
+  STORE 14
+  JMP dmn_rule_1_match_done
+dmn_rule_1_match_check_2:
+  LOAD 7
+  SUB 2
+  JZ dmn_rule_1_match_slot_2
+dmn_rule_1_match_slot_2:
+  LOADI 2
+  STORE 10
+  LOADI 1
+  STORE 15
+  LOADI 2
+  STORE 16
+  JMP dmn_rule_1_match_done
+dmn_rule_1_match_done:
+  LOAD 7
+  ADD 1
+  STORE 7
+  LOADI 1
+  STORE 2
+  LOADI 2
+  STORE 3
+  LOADI 1
+  STORE 4
+  LOADI 2
+  STORE 5
+  LOADI 2
+  STORE 6
+  HALT
+dmn_rule_1_insufficient:
+  LOADI 0
+  STORE 2
+  LOADI 0
+  STORE 3
+  LOADI 0
+  STORE 4
+  LOADI -2
+  STORE 5
+  LOADI 2
+  STORE 6
+  HALT
+dmn_default_rule:
+  LOAD 7
+  SUB 0
+  JZ dmn_default_rule_match_slot_0
+  JMP dmn_default_rule_match_check_1
+dmn_default_rule_match_slot_0:
+  LOADI 99
+  STORE 8
+  LOADI 0
+  STORE 11
+  LOADI 99
+  STORE 12
+  JMP dmn_default_rule_match_done
+dmn_default_rule_match_check_1:
+  LOAD 7
+  SUB 1
+  JZ dmn_default_rule_match_slot_1
+  JMP dmn_default_rule_match_check_2
+dmn_default_rule_match_slot_1:
+  LOADI 99
+  STORE 9
+  LOADI 0
+  STORE 13
+  LOADI 99
+  STORE 14
+  JMP dmn_default_rule_match_done
+dmn_default_rule_match_check_2:
+  LOAD 7
+  SUB 2
+  JZ dmn_default_rule_match_slot_2
+dmn_default_rule_match_slot_2:
+  LOADI 99
+  STORE 10
+  LOADI 0
+  STORE 15
+  LOADI 99
+  STORE 16
+  JMP dmn_default_rule_match_done
+dmn_default_rule_match_done:
+  LOAD 7
+  ADD 1
+  STORE 7
+  LOADI 0
+  STORE 2
+  LOADI 99
+  STORE 3
+  LOADI 1
+  STORE 4
+  LOADI 99
+  STORE 5
+  LOADI 99
+  STORE 6
+  HALT

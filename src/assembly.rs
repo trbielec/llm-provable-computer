@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::error::{Result, VmError};
 use crate::instruction::{Instruction, Program};
+use crate::state::Word;
 
 #[derive(Debug)]
 struct PendingInstruction {
@@ -14,7 +15,7 @@ pub fn parse_program(source: &str) -> Result<Program> {
     let mut labels = HashMap::new();
     let mut pending = Vec::new();
     let mut memory_size = 16usize;
-    let mut initial_memory = None::<Vec<i16>>;
+    let mut initial_memory = None::<Vec<Word>>;
 
     for (idx, raw_line) in source.lines().enumerate() {
         let line_no = idx + 1;
@@ -24,6 +25,15 @@ pub fn parse_program(source: &str) -> Result<Program> {
         }
 
         if let Some((label, rest)) = split_label(&line, line_no)? {
+            if pending.len() > usize::from(u8::MAX) {
+                return Err(VmError::Parse {
+                    line: line_no,
+                    message: format!(
+                        "program has too many instructions for the u8 program counter: {}",
+                        pending.len()
+                    ),
+                });
+            }
             if labels.insert(label.clone(), pending.len() as u8).is_some() {
                 return Err(VmError::Parse {
                     line: line_no,
@@ -66,7 +76,7 @@ pub fn parse_program(source: &str) -> Result<Program> {
                     });
                 }
                 let address = parse_usize(&operands[0], line_no, "memory address")?;
-                let value = parse_i16(&operands[1], line_no, "initial value")?;
+                let value = parse_word(&operands[1], line_no, "initial value")?;
                 let memory = initial_memory.get_or_insert_with(|| vec![0; memory_size]);
                 if address >= memory.len() {
                     return Err(VmError::Parse {
@@ -92,6 +102,15 @@ pub fn parse_program(source: &str) -> Result<Program> {
         .into_iter()
         .map(|pending| parse_instruction(pending, &labels))
         .collect::<Result<Vec<_>>>()?;
+    if instructions.len() > usize::from(u8::MAX) + 1 {
+        return Err(VmError::Parse {
+            line: source.lines().count(),
+            message: format!(
+                "program has too many instructions for the u8 program counter: {}",
+                instructions.len()
+            ),
+        });
+    }
 
     let program = Program::new(instructions, memory_size)
         .with_initial_memory(initial_memory.unwrap_or_else(|| vec![0; memory_size]))?;
@@ -139,30 +158,32 @@ fn parse_instruction(
     let line = pending.line;
     let instruction = match pending.mnemonic.as_str() {
         "NOP" => expect_arity(line, operands, 0).map(|_| Instruction::Nop)?,
-        "LOADI" => Instruction::LoadImmediate(parse_i16_operand(line, operands)?),
+        "LOADI" => Instruction::LoadImmediate(parse_word_operand(line, operands)?),
         "LOAD" => Instruction::Load(parse_u8_operand(line, operands)?),
         "STORE" => Instruction::Store(parse_u8_operand(line, operands)?),
         "PUSH" => expect_arity(line, operands, 0).map(|_| Instruction::Push)?,
         "POP" => expect_arity(line, operands, 0).map(|_| Instruction::Pop)?,
-        "ADD" => Instruction::AddImmediate(parse_i16_operand(line, operands)?),
+        "ADD" => Instruction::AddImmediate(parse_word_operand(line, operands)?),
         "ADDM" => Instruction::AddMemory(parse_u8_operand(line, operands)?),
-        "SUB" => Instruction::SubImmediate(parse_i16_operand(line, operands)?),
+        "SUB" => Instruction::SubImmediate(parse_word_operand(line, operands)?),
         "SUBM" => Instruction::SubMemory(parse_u8_operand(line, operands)?),
-        "MUL" => Instruction::MulImmediate(parse_i16_operand(line, operands)?),
+        "MUL" => Instruction::MulImmediate(parse_word_operand(line, operands)?),
         "MULM" => Instruction::MulMemory(parse_u8_operand(line, operands)?),
-        "AND" => Instruction::AndImmediate(parse_i16_operand(line, operands)?),
+        "AND" => Instruction::AndImmediate(parse_word_operand(line, operands)?),
         "ANDM" => Instruction::AndMemory(parse_u8_operand(line, operands)?),
-        "OR" => Instruction::OrImmediate(parse_i16_operand(line, operands)?),
+        "OR" => Instruction::OrImmediate(parse_word_operand(line, operands)?),
         "ORM" => Instruction::OrMemory(parse_u8_operand(line, operands)?),
-        "XOR" => Instruction::XorImmediate(parse_i16_operand(line, operands)?),
+        "XOR" => Instruction::XorImmediate(parse_word_operand(line, operands)?),
         "XORM" => Instruction::XorMemory(parse_u8_operand(line, operands)?),
-        "CMP" => Instruction::CmpImmediate(parse_i16_operand(line, operands)?),
+        "CMP" => Instruction::CmpImmediate(parse_word_operand(line, operands)?),
         "CMPM" => Instruction::CmpMemory(parse_u8_operand(line, operands)?),
         "CALL" => Instruction::Call(parse_target(line, operands, labels)?),
         "RET" => expect_arity(line, operands, 0).map(|_| Instruction::Ret)?,
         "JMP" => Instruction::Jump(parse_target(line, operands, labels)?),
         "JZ" => Instruction::JumpIfZero(parse_target(line, operands, labels)?),
         "JNZ" => Instruction::JumpIfNotZero(parse_target(line, operands, labels)?),
+        "JS" => Instruction::JumpIfSign(parse_target(line, operands, labels)?),
+        "JNS" => Instruction::JumpIfNotSign(parse_target(line, operands, labels)?),
         "HALT" => expect_arity(line, operands, 0).map(|_| Instruction::Halt)?,
         _ => {
             return Err(VmError::Parse {
@@ -184,9 +205,9 @@ fn expect_arity(line: usize, operands: &[String], expected: usize) -> Result<()>
     Ok(())
 }
 
-fn parse_i16_operand(line: usize, operands: &[String]) -> Result<i16> {
+fn parse_word_operand(line: usize, operands: &[String]) -> Result<Word> {
     expect_arity(line, operands, 1)?;
-    parse_i16(&operands[0], line, "immediate")
+    parse_word(&operands[0], line, "immediate")
 }
 
 fn parse_u8_operand(line: usize, operands: &[String]) -> Result<u8> {
@@ -215,8 +236,8 @@ fn parse_u8(token: &str, line: usize, subject: &str) -> Result<u8> {
     })
 }
 
-fn parse_i16(token: &str, line: usize, subject: &str) -> Result<i16> {
-    token.parse::<i16>().map_err(|_| VmError::Parse {
+fn parse_word(token: &str, line: usize, subject: &str) -> Result<Word> {
+    token.parse::<Word>().map_err(|_| VmError::Parse {
         line,
         message: format!("invalid {subject} `{token}`"),
     })
@@ -319,10 +340,12 @@ mod tests {
             JMP 0
             JZ 0
             JNZ 0
+            JS 0
+            JNS 0
             HALT
         "#;
         let program = parse_program(source).unwrap();
-        assert_eq!(program.len(), 26);
+        assert_eq!(program.len(), 28);
     }
 
     #[test]

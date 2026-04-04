@@ -1,0 +1,37 @@
+{
+  "name": "Loan Affordability Underwriting",
+  "type": "cDMN",
+  "variables": [
+    { "name": "monthly_income", "memory": 0, "presence_memory": 6 },
+    { "name": "existing_debt_payment", "memory": 1 },
+    { "name": "proposed_loan_payment", "memory": 2 },
+    { "name": "max_dti_pct", "memory": 3 },
+    { "name": "min_credit_score", "memory": 4 },
+    { "name": "credit_score", "memory": 5 }
+  ],
+  "definitions": [
+    {
+      "name": "total_monthly_debt",
+      "expression": "existing_debt_payment + proposed_loan_payment",
+      "description": "Combined current and proposed monthly debt service"
+    }
+  ],
+  "constraints": [
+    {
+      "id": "LU1",
+      "description": "Applicant credit score must meet the underwriting floor",
+      "logic": "credit_score >= min_credit_score",
+      "reason_code": 501,
+      "reason_label": "credit_score_too_low"
+    },
+    {
+      "id": "LU2",
+      "description": "Debt-to-income must stay within the approved percentage limit",
+      "logic": "total_monthly_debt * 100 <= monthly_income * max_dti_pct",
+      "reason_code": 502,
+      "reason_label": "dti_limit_exceeded",
+      "insufficient_data_reason_code": 503,
+      "insufficient_data_reason_label": "income_documentation_missing"
+    }
+  ]
+}

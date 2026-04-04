@@ -7,7 +7,11 @@ use llm_provable_computer::{
 fn native_interpreter_executes_subroutine_program() {
     let source = std::fs::read_to_string("programs/subroutine_addition.tvm").expect("fixture");
     let program = parse_program(&source).expect("parse");
-    let mut interpreter = NativeInterpreter::new(program, Attention2DMode::AverageHard, 128);
+    let mut interpreter = NativeInterpreter::new(
+        program,
+        Attention2DMode::AverageHard { query: [1.0, 0.0] },
+        128,
+    );
 
     let result = interpreter.run().expect("run");
 
@@ -28,7 +32,11 @@ fn native_interpreter_reports_stack_underflow() {
     "#,
     )
     .expect("parse");
-    let mut interpreter = NativeInterpreter::new(program, Attention2DMode::AverageHard, 8);
+    let mut interpreter = NativeInterpreter::new(
+        program,
+        Attention2DMode::AverageHard { query: [1.0, 0.0] },
+        8,
+    );
 
     let error = interpreter.run().expect_err("POP should underflow");
     match error {
@@ -46,7 +54,10 @@ fn native_interpreter_honors_soft_attention_mode() {
     let program = parse_program(&source).expect("parse");
     let mut interpreter = NativeInterpreter::new(
         program,
-        Attention2DMode::HardSoftmax { temperature: 10.0 },
+        Attention2DMode::HardSoftmax {
+            temperature: 10.0,
+            query: [1.0, 0.0],
+        },
         32,
     );
 
@@ -63,28 +74,31 @@ fn verifier_matches_transformer_for_shipped_programs() {
             "programs/addition.tvm",
             32,
             1,
-            Attention2DMode::AverageHard,
+            Attention2DMode::AverageHard { query: [1.0, 0.0] },
             8,
         ),
         (
             "programs/counter.tvm",
             128,
             3,
-            Attention2DMode::AverageHard,
+            Attention2DMode::AverageHard { query: [1.0, 0.0] },
             5,
         ),
         (
             "programs/fibonacci.tvm",
             512,
             4,
-            Attention2DMode::AverageHard,
+            Attention2DMode::AverageHard { query: [1.0, 0.0] },
             21,
         ),
         (
             "programs/soft_attention_memory.tvm",
             32,
             2,
-            Attention2DMode::HardSoftmax { temperature: 10.0 },
+            Attention2DMode::HardSoftmax {
+                temperature: 10.0,
+                query: [1.0, 0.0],
+            },
             4,
         ),
     ];

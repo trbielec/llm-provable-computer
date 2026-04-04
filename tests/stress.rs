@@ -293,7 +293,7 @@ fn stress_soft_attention_multiple_memory_writes() {
         .compile_source(
             &source,
             TransformerVmConfig {
-                attention_mode: Attention2DMode::AverageHard,
+                attention_mode: Attention2DMode::AverageHard { query: [1.0, 0.0] },
                 ..TransformerVmConfig::default()
             },
         )
@@ -306,7 +306,7 @@ fn stress_soft_attention_multiple_memory_writes() {
         .compile_source(
             &source,
             TransformerVmConfig {
-                attention_mode: Attention2DMode::Softmax,
+                attention_mode: Attention2DMode::Softmax { query: [1.0, 0.0] },
                 ..TransformerVmConfig::default()
             },
         )

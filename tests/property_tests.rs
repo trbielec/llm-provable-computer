@@ -1,6 +1,6 @@
 use llm_provable_computer::{
     decode_state, encode_state, verify_model_against_native, Attention2DMode, HullKvCache,
-    Instruction, MachineState, Program, ProgramCompiler, TransformerVmConfig,
+    Instruction, MachineState, Program, ProgramCompiler, TransformerVmConfig, Word, MIN_D_MODEL,
 };
 use proptest::prelude::*;
 
@@ -12,15 +12,16 @@ use llm_provable_computer::{
 };
 
 const RANDOM_MEMORY_SIZE: usize = 8;
+const RANDOM_WORD_BOUND: Word = 1_000_000;
 
-fn build_random_program(specs: &[(u8, i16, u8, u8)]) -> Program {
+fn build_random_program(specs: &[(u8, Word, u8, u8)]) -> Program {
     let len = specs.len();
     let mut instructions = specs
         .iter()
         .map(|&(opcode, immediate, address, target)| {
             let address = address % RANDOM_MEMORY_SIZE as u8;
             let target = target % len as u8;
-            match opcode % 20 {
+            match opcode % 14 {
                 0 => Instruction::Nop,
                 1 => Instruction::LoadImmediate(immediate),
                 2 => Instruction::Load(address),
@@ -29,18 +30,12 @@ fn build_random_program(specs: &[(u8, i16, u8, u8)]) -> Program {
                 5 => Instruction::AddMemory(address),
                 6 => Instruction::SubImmediate(immediate),
                 7 => Instruction::SubMemory(address),
-                8 => Instruction::MulImmediate(immediate),
-                9 => Instruction::MulMemory(address),
-                10 => Instruction::AndImmediate(immediate),
-                11 => Instruction::AndMemory(address),
-                12 => Instruction::OrImmediate(immediate),
-                13 => Instruction::OrMemory(address),
-                14 => Instruction::XorImmediate(immediate),
-                15 => Instruction::XorMemory(address),
-                16 => Instruction::CmpImmediate(immediate),
-                17 => Instruction::CmpMemory(address),
-                18 => Instruction::JumpIfZero(target),
-                19 => Instruction::JumpIfNotZero(target),
+                8 => Instruction::CmpImmediate(immediate),
+                9 => Instruction::CmpMemory(address),
+                10 => Instruction::JumpIfZero(target),
+                11 => Instruction::JumpIfNotZero(target),
+                12 => Instruction::JumpIfSign(target),
+                13 => Instruction::JumpIfNotSign(target),
                 _ => unreachable!(),
             }
         })
@@ -57,7 +52,7 @@ proptest! {
     #[test]
     fn state_round_trips_for_all_valid_fields(
         pc in 0u8..=255u8,
-        acc in i16::MIN..=i16::MAX,
+        acc in any::<Word>(),
         sp in 0u8..=255u8,
         zero_flag in any::<bool>(),
         carry_flag in any::<bool>(),
@@ -72,7 +67,7 @@ proptest! {
             halted,
             memory: vec![0; 4],
         };
-        let token = encode_state(&state, 36).unwrap();
+        let token = encode_state(&state, MIN_D_MODEL).unwrap();
         let decoded = decode_state(&token, state.memory.clone()).unwrap();
         prop_assert_eq!(decoded, state);
     }
@@ -204,7 +199,7 @@ proptest! {
         }
 
         let blended = cache
-            .query_value([1.0, 0.0], &Attention2DMode::HardSoftmax { temperature })
+            .query_value([1.0, 0.0], &Attention2DMode::HardSoftmax { temperature, query: [1.0, 0.0] })
             .unwrap()[0];
         let min_value = values.iter().copied().fold(f32::INFINITY, f32::min);
         let max_value = values.iter().copied().fold(f32::NEG_INFINITY, f32::max);
@@ -215,8 +210,8 @@ proptest! {
 
     #[test]
     fn transformer_matches_native_on_random_average_hard_programs(
-        specs in prop::collection::vec((0u8..20u8, any::<i16>(), any::<u8>(), any::<u8>()), 1..24),
-        initial_memory in prop::collection::vec(any::<i16>(), RANDOM_MEMORY_SIZE..=RANDOM_MEMORY_SIZE),
+        specs in prop::collection::vec((0u8..12u8, 0..=RANDOM_WORD_BOUND, any::<u8>(), any::<u8>()), 1..24),
+        initial_memory in prop::collection::vec(0..=RANDOM_WORD_BOUND, RANDOM_MEMORY_SIZE..=RANDOM_MEMORY_SIZE),
         layers in 1usize..=4,
         max_steps in 1usize..=64,
     ) {
@@ -228,7 +223,7 @@ proptest! {
                 program,
                 TransformerVmConfig {
                     num_layers: layers,
-                    attention_mode: Attention2DMode::AverageHard,
+                    attention_mode: Attention2DMode::AverageHard { query: [1.0, 0.0] },
                     ..TransformerVmConfig::default()
                 },
             )
@@ -242,8 +237,8 @@ proptest! {
 
     #[test]
     fn transformer_matches_native_on_random_soft_attention_programs(
-        specs in prop::collection::vec((0u8..20u8, any::<i16>(), any::<u8>(), any::<u8>()), 1..24),
-        initial_memory in prop::collection::vec(any::<i16>(), RANDOM_MEMORY_SIZE..=RANDOM_MEMORY_SIZE),
+        specs in prop::collection::vec((0u8..12u8, 0..=RANDOM_WORD_BOUND, any::<u8>(), any::<u8>()), 1..24),
+        initial_memory in prop::collection::vec(0..=RANDOM_WORD_BOUND, RANDOM_MEMORY_SIZE..=RANDOM_MEMORY_SIZE),
         layers in 1usize..=4,
         max_steps in 1usize..=64,
         temperature in 0.1f32..20.0f32,
@@ -256,7 +251,7 @@ proptest! {
                 program,
                 TransformerVmConfig {
                     num_layers: layers,
-                    attention_mode: Attention2DMode::HardSoftmax { temperature },
+                    attention_mode: Attention2DMode::HardSoftmax { temperature, query: [1.0, 0.0] },
                     ..TransformerVmConfig::default()
                 },
             )
@@ -271,8 +266,8 @@ proptest! {
     #[cfg(feature = "burn-model")]
     #[test]
     fn burn_matches_native_on_random_average_hard_programs(
-        specs in prop::collection::vec((0u8..20u8, any::<i16>(), any::<u8>(), any::<u8>()), 1..24),
-        initial_memory in prop::collection::vec(any::<i16>(), RANDOM_MEMORY_SIZE..=RANDOM_MEMORY_SIZE),
+        specs in prop::collection::vec((0u8..12u8, 0..=RANDOM_WORD_BOUND, any::<u8>(), any::<u8>()), 1..24),
+        initial_memory in prop::collection::vec(0..=RANDOM_WORD_BOUND, RANDOM_MEMORY_SIZE..=RANDOM_MEMORY_SIZE),
         layers in 1usize..=4,
         max_steps in 1usize..=64,
     ) {
@@ -287,7 +282,7 @@ proptest! {
                 program,
                 TransformerVmConfig {
                     num_layers: layers,
-                    attention_mode: Attention2DMode::AverageHard,
+                    attention_mode: Attention2DMode::AverageHard { query: [1.0, 0.0] },
                     ..TransformerVmConfig::default()
                 },
             )

@@ -196,7 +196,9 @@ fn python_validator_matches_native_trace_for_shipped_programs() {
             "programs/soft_attention_memory.tvm",
             TransformerVmConfig {
                 num_layers: 2,
-                attention_mode: llm_provable_computer::Attention2DMode::Softmax,
+                attention_mode: llm_provable_computer::Attention2DMode::Softmax {
+                    query: [1.0, 0.0],
+                },
                 ..TransformerVmConfig::default()
             },
             "soft_attention_memory_softmax",

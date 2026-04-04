@@ -14,10 +14,11 @@ use llm_provable_computer::verify_engines;
 #[cfg(feature = "onnx-export")]
 use llm_provable_computer::{export_program_onnx, OnnxExecutionRuntime};
 use llm_provable_computer::{
-    load_execution_stark_proof, prove_execution_stark, run_execution_tui,
-    save_execution_stark_proof, verify_execution_stark, verify_model_against_native,
-    Attention2DMode, ExecutionResult, ExecutionRuntime, ExecutionTraceEntry, MachineState,
-    NativeInterpreter, ProgramCompiler, TransformerVm, TransformerVmConfig, VmError,
+    load_execution_stark_proof, prove_aggregate_verification, prove_execution_stark,
+    run_execution_tui, save_execution_stark_proof, verify_aggregate_proof, verify_execution_stark,
+    verify_model_against_native, ApproximateVerificationConfig, Attention2DMode, ExecutionResult,
+    ExecutionRuntime, ExecutionTraceEntry, MachineState, NativeInterpreter, ProgramCompiler,
+    RecursiveAggregateProof, TransformerVm, TransformerVmConfig, VmError,
 };
 #[cfg(feature = "burn-model")]
 use llm_provable_computer::{BurnExecutionRuntime, BurnTransformerVm};
@@ -141,6 +142,72 @@ enum Command {
     VerifyStark {
         /// Path to the serialized proof JSON file.
         proof: PathBuf,
+    },
+    /// Aggregate one or more STARK proofs into a Rescue-bound recursive artifact.
+    AggregateProofs {
+        /// Paths to the serialized STARK proof JSON files.
+        proofs: Vec<PathBuf>,
+        /// File where the aggregate proof JSON will be written.
+        #[arg(short = 'o', long = "output")]
+        output: PathBuf,
+    },
+    /// Verify a previously generated aggregate proof artifact.
+    VerifyAggregate {
+        /// Path to the serialized aggregate proof JSON file.
+        proof: PathBuf,
+    },
+    /// Produce a compact execution receipt for commit-and-audit.
+    Commit {
+        /// Path to the source `.tvm` program.
+        program: PathBuf,
+        /// File where the serialized receipt JSON will be written.
+        #[arg(short = 'o', long = "output")]
+        output: PathBuf,
+        /// Maximum number of execution steps before stopping.
+        #[arg(long, default_value_t = 512)]
+        max_steps: usize,
+        /// Number of transformer layers to distribute instructions across.
+        #[arg(long, default_value_t = 1)]
+        layers: usize,
+        /// Attention mode to use for memory reads.
+        #[arg(
+            long,
+            default_value = "average-hard",
+            value_parser = parse_attention_mode
+        )]
+        attention_mode: Attention2DMode,
+    },
+    /// Audit a previously generated execution receipt.
+    Audit {
+        /// Path to the source `.tvm` program.
+        program: PathBuf,
+        /// Path to the serialized receipt JSON file.
+        receipt: PathBuf,
+        /// Specific step index to audit.
+        #[arg(long)]
+        step: Option<usize>,
+        /// Absolute epsilon for approximate replay verification.
+        #[arg(long)]
+        absolute_epsilon: Option<f64>,
+        /// Relative epsilon for approximate replay verification.
+        #[arg(long)]
+        relative_epsilon: Option<f64>,
+        /// Maximum allowed fraction of deviating values in approximate replay verification.
+        #[arg(long)]
+        max_deviating_fraction: Option<f64>,
+        /// Emit structured JSON for approximate comparison results.
+        #[arg(long)]
+        json: bool,
+        /// Number of transformer layers to distribute instructions across.
+        #[arg(long, default_value_t = 1)]
+        layers: usize,
+        /// Attention mode to use for memory reads.
+        #[arg(
+            long,
+            default_value = "average-hard",
+            value_parser = parse_attention_mode
+        )]
+        attention_mode: Attention2DMode,
     },
 }
 
@@ -273,6 +340,36 @@ fn run() -> llm_provable_computer::Result<()> {
             attention_mode,
         } => prove_stark_command(&program, &output, max_steps, layers, attention_mode)?,
         Command::VerifyStark { proof } => verify_stark_command(&proof)?,
+        Command::AggregateProofs { proofs, output } => aggregate_proofs_command(&proofs, &output)?,
+        Command::VerifyAggregate { proof } => verify_aggregate_command(&proof)?,
+        Command::Commit {
+            program,
+            output,
+            max_steps,
+            layers,
+            attention_mode,
+        } => commit_command(&program, &output, max_steps, layers, attention_mode)?,
+        Command::Audit {
+            program,
+            receipt,
+            step,
+            absolute_epsilon,
+            relative_epsilon,
+            max_deviating_fraction,
+            json,
+            layers,
+            attention_mode,
+        } => audit_command(
+            &program,
+            &receipt,
+            step,
+            absolute_epsilon,
+            relative_epsilon,
+            max_deviating_fraction,
+            json,
+            layers,
+            attention_mode,
+        )?,
     }
 
     Ok(())
@@ -399,6 +496,219 @@ fn verify_stark_command(proof_path: &Path) -> llm_provable_computer::Result<()> 
     println!("instructions: {}", proof.claim.program.instructions().len());
     println!("proof_bytes: {}", proof.proof.len());
 
+    Ok(())
+}
+
+fn aggregate_proofs_command(
+    proof_paths: &[PathBuf],
+    output: &Path,
+) -> llm_provable_computer::Result<()> {
+    if proof_paths.is_empty() {
+        return Err(VmError::InvalidConfig(
+            "aggregate-proofs requires at least one proof path".to_string(),
+        ));
+    }
+
+    let mut proofs = Vec::with_capacity(proof_paths.len());
+    for path in proof_paths {
+        proofs.push(load_execution_stark_proof(path)?);
+    }
+
+    let aggregate = prove_aggregate_verification(&proofs)?;
+    let bytes = serde_json::to_vec_pretty(&aggregate)
+        .map_err(|error| VmError::Serialization(error.to_string()))?;
+    fs::write(output, bytes)?;
+
+    println!("aggregate_proof: {}", output.display());
+    println!("proof_count: {}", aggregate.inner_proofs.len());
+    println!("accepted: {}", aggregate.accepted);
+    println!("aggregate_root: {}", aggregate.aggregate_root);
+    Ok(())
+}
+
+fn verify_aggregate_command(path: &Path) -> llm_provable_computer::Result<()> {
+    let bytes = fs::read(path)?;
+    let aggregate: RecursiveAggregateProof = serde_json::from_slice(&bytes)
+        .map_err(|error| VmError::Serialization(error.to_string()))?;
+
+    if !verify_aggregate_proof(&aggregate)? {
+        return Err(VmError::InvalidConfig(format!(
+            "aggregate proof verification failed for {}",
+            path.display()
+        )));
+    }
+
+    println!("aggregate_proof: {}", path.display());
+    println!("verified_aggregate: true");
+    println!("proof_count: {}", aggregate.inner_proofs.len());
+    println!("accepted: {}", aggregate.accepted);
+    println!("aggregate_root: {}", aggregate.aggregate_root);
+    Ok(())
+}
+
+fn commit_command(
+    program_path: &Path,
+    output_path: &Path,
+    max_steps: usize,
+    layers: usize,
+    attention_mode: Attention2DMode,
+) -> llm_provable_computer::Result<()> {
+    let model = compile_model(program_path, layers, attention_mode)?;
+    let mut runtime = ExecutionRuntime::new(model.clone(), max_steps);
+    let (_result, witness) = runtime.run_with_witness()?;
+
+    let (receipt, _m_trace, _w_commitment) =
+        llm_provable_computer::commit_execution(&model, &witness)?;
+    save_receipt(&receipt, output_path)?;
+
+    println!("program: {}", program_path.display());
+    println!("receipt: {}", output_path.display());
+    println!("steps: {}", receipt.step_count);
+    println!("halted: {}", receipt.final_state.halted);
+    println!("pc: {}", receipt.final_state.pc);
+    println!("acc: {}", receipt.final_state.acc);
+    println!("trace_root: 0x{}", manual_hex_encode(&receipt.trace_root));
+    println!(
+        "weights_root: 0x{}",
+        manual_hex_encode(&receipt.weights_root)
+    );
+
+    Ok(())
+}
+
+fn manual_hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+fn audit_command(
+    program_path: &Path,
+    receipt_path: &Path,
+    step_idx: Option<usize>,
+    absolute_epsilon: Option<f64>,
+    relative_epsilon: Option<f64>,
+    max_deviating_fraction: Option<f64>,
+    json: bool,
+    layers: usize,
+    attention_mode: Attention2DMode,
+) -> llm_provable_computer::Result<()> {
+    let receipt_json = fs::read_to_string(receipt_path).map_err(|e| {
+        VmError::InvalidConfig(format!(
+            "failed to read receipt {}: {e}",
+            receipt_path.display()
+        ))
+    })?;
+    let receipt: llm_provable_computer::ExecutionReceipt = serde_json::from_str(&receipt_json)
+        .map_err(|e| VmError::InvalidConfig(format!("failed to parse receipt: {e}")))?;
+
+    let model = compile_model(program_path, layers, attention_mode)?;
+    let mut runtime = ExecutionRuntime::new(model.clone(), receipt.step_count);
+    let (_result, witness) = runtime.run_with_witness()?;
+
+    let staged_trace = llm_provable_computer::build_shared_transformer_staged_trace(
+        &witness,
+        model.config().ff_dim,
+    )?;
+    let m_trace = llm_provable_computer::merkle_trace::MerkleizedTrace::new(&staged_trace.rows)?;
+    let w_commitment = llm_provable_computer::WeightCommitment::new(&model)?;
+    let approximate_config =
+        build_approximate_config(absolute_epsilon, relative_epsilon, max_deviating_fraction)?;
+
+    let target_step = step_idx.unwrap_or(0);
+    let request = llm_provable_computer::AuditRequest {
+        target: llm_provable_computer::AuditTarget::Steps(vec![target_step]),
+        challenge: None,
+        approximate_config,
+    };
+
+    let response = llm_provable_computer::audit_execution(
+        &model,
+        &m_trace,
+        &w_commitment,
+        &witness,
+        &staged_trace,
+        &request,
+    )?;
+
+    if let Some(config) = request.approximate_config.as_ref() {
+        let report = llm_provable_computer::verify_audit_with_config(
+            &receipt, &response, &witness, config, None,
+        )?;
+        if !report.passed {
+            return Err(VmError::InvalidConfig(format!(
+                "approximate audit verification failed for receipt {}",
+                receipt_path.display()
+            )));
+        }
+
+        if json {
+            let payload = if report.approximate_comparisons.len() == 1 {
+                serde_json::to_string_pretty(&report.approximate_comparisons[0])
+            } else {
+                serde_json::to_string_pretty(&report.approximate_comparisons)
+            }
+            .map_err(|error| VmError::Serialization(error.to_string()))?;
+            println!("{payload}");
+            return Ok(());
+        }
+
+        println!("receipt: {}", receipt_path.display());
+        println!("audit_step: {}", target_step);
+        println!("verified_audit: true");
+        println!("approximate_mode: true");
+        for comparison in &report.approximate_comparisons {
+            println!("total_values: {}", comparison.total_values);
+            println!("deviating_values: {}", comparison.deviating_values);
+            println!("max_absolute_error: {}", comparison.max_absolute_error);
+            println!("max_relative_error: {}", comparison.max_relative_error);
+        }
+    } else if !llm_provable_computer::verify_audit(&receipt, &response, None) {
+        return Err(VmError::InvalidConfig(format!(
+            "audit verification failed for receipt {}",
+            receipt_path.display()
+        )));
+    } else {
+        println!("receipt: {}", receipt_path.display());
+        println!("audit_step: {}", target_step);
+        println!("verified_audit: true");
+        println!("row_type: {:?}", response.opened_steps[0].row.stage());
+    }
+
+    Ok(())
+}
+
+fn build_approximate_config(
+    absolute_epsilon: Option<f64>,
+    relative_epsilon: Option<f64>,
+    max_deviating_fraction: Option<f64>,
+) -> llm_provable_computer::Result<Option<ApproximateVerificationConfig>> {
+    if absolute_epsilon.is_none() && relative_epsilon.is_none() && max_deviating_fraction.is_none()
+    {
+        return Ok(None);
+    }
+
+    let config = ApproximateVerificationConfig {
+        absolute_epsilon: absolute_epsilon.unwrap_or(1e-6),
+        relative_epsilon: relative_epsilon.unwrap_or(1e-6),
+        max_deviating_fraction: max_deviating_fraction.unwrap_or(0.0),
+    };
+    config.validate().map_err(|error| {
+        VmError::InvalidConfig(format!("invalid approximate audit configuration: {error}"))
+    })?;
+    Ok(Some(config))
+}
+
+fn save_receipt(
+    receipt: &llm_provable_computer::ExecutionReceipt,
+    path: &Path,
+) -> llm_provable_computer::Result<()> {
+    let json = serde_json::to_string_pretty(receipt)
+        .map_err(|e| VmError::Serialization(format!("failed to serialize receipt: {e}")))?;
+    fs::write(path, json).map_err(|e| {
+        VmError::InvalidConfig(format!(
+            "failed to write receipt to {}: {e}",
+            path.display()
+        ))
+    })?;
     Ok(())
 }
 
@@ -740,7 +1050,14 @@ fn needs_run_subcommand(first_arg: &str) -> bool {
     !first_arg.starts_with('-')
         && !matches!(
             first_arg,
-            "run" | "tui" | "export-onnx" | "prove-stark" | "verify-stark" | "help"
+            "run"
+                | "tui"
+                | "export-onnx"
+                | "prove-stark"
+                | "verify-stark"
+                | "commit"
+                | "audit"
+                | "help"
         )
 }
 

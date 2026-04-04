@@ -1,0 +1,55 @@
+{
+  "name": "Vendor Due Diligence Review",
+  "type": "cDMN",
+  "variables": [
+    { "name": "max_vendor_risk", "memory": 0 },
+    { "name": "vendor_risk_score", "memory": 1 },
+    { "name": "prohibited_country", "memory": 2 },
+    { "name": "required_certification", "memory": 3 }
+  ],
+  "collections": [
+    {
+      "name": "facilities",
+      "count_memory": 4,
+      "base_memory": 5,
+      "stride": 1,
+      "max_items": 3,
+      "fields": [
+        { "name": "country_code", "offset": 0 }
+      ]
+    },
+    {
+      "name": "certifications",
+      "count_memory": 8,
+      "base_memory": 9,
+      "stride": 1,
+      "max_items": 3,
+      "fields": [
+        { "name": "code", "offset": 0 }
+      ]
+    }
+  ],
+  "constraints": [
+    {
+      "id": "VD1",
+      "description": "Vendor risk score must stay below the approved ceiling",
+      "logic": "vendor_risk_score <= max_vendor_risk",
+      "reason_code": 601,
+      "reason_label": "vendor_risk_too_high"
+    },
+    {
+      "id": "VD2",
+      "description": "No facility may be located in a prohibited country",
+      "logic": "forall facility in facilities (not (facility.country_code == prohibited_country))",
+      "reason_code": 602,
+      "reason_label": "prohibited_jurisdiction_present"
+    },
+    {
+      "id": "VD3",
+      "description": "A required certification must be present before onboarding",
+      "logic": "exists certification in certifications (certification.code == required_certification)",
+      "reason_code": 603,
+      "reason_label": "required_certification_missing"
+    }
+  ]
+}

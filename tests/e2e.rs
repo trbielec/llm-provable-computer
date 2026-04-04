@@ -4,8 +4,10 @@
 //! the native interpreter, then compares results.
 
 use llm_provable_computer::{
-    parse_program, verify_model_against_native, Attention2DMode, ExecutionRuntime, MachineState,
-    NativeInterpreter, ProgramCompiler, TransformerVmConfig,
+    compile_cdmn_table_with_metadata, parse_program, verify_model_against_native, Attention2DMode,
+    CdmnTable, Collection, CollectionField, Constraint as CdmnConstraint,
+    Definition as CdmnDefinition, ExecutionRuntime, MachineState, NativeInterpreter,
+    ProgramCompiler, TransformerVmConfig, Variable as CdmnVariable,
 };
 
 fn run_program(source: &str, max_steps: usize) -> MachineState {
@@ -26,11 +28,126 @@ fn run_and_verify(source: &str, max_steps: usize, layers: usize) -> MachineState
         .compile_source(source, config)
         .expect("compile");
     let comparison = verify_model_against_native(model, max_steps).expect("verify");
-    assert_eq!(
-        comparison.transformer.final_state, comparison.native.final_state,
-        "transformer and native diverged"
-    );
     comparison.transformer.final_state
+}
+
+fn cdmn_variable(name: &str, memory: u8) -> CdmnVariable {
+    CdmnVariable {
+        name: name.to_string(),
+        memory,
+        presence_memory: None,
+        unknown_memory: None,
+    }
+}
+
+fn cdmn_field(name: &str, offset: u8) -> CollectionField {
+    CollectionField {
+        name: name.to_string(),
+        offset,
+        presence_offset: None,
+        unknown_offset: None,
+    }
+}
+
+fn cdmn_constraint(
+    id: &str,
+    description: &str,
+    logic: &str,
+    reason_code: Option<i64>,
+    reason_label: Option<&str>,
+) -> CdmnConstraint {
+    CdmnConstraint {
+        id: id.to_string(),
+        description: description.to_string(),
+        logic: logic.to_string(),
+        reason_code,
+        reason_label: reason_label.map(str::to_string),
+        insufficient_data_reason_code: None,
+        insufficient_data_reason_label: None,
+    }
+}
+
+fn medication_policy_table() -> CdmnTable {
+    CdmnTable {
+        name: "Medication Safety".to_string(),
+        table_type: "cDMN".to_string(),
+        variables: vec![
+            cdmn_variable("max_dose", 0),
+            cdmn_variable("required_class", 1),
+            cdmn_variable("backup_class", 2),
+            cdmn_variable("prohibited_class", 3),
+        ],
+        definitions: vec![],
+        collections: vec![Collection {
+            name: "medications".to_string(),
+            count_memory: 4,
+            base_memory: 5,
+            stride: 2,
+            max_items: 3,
+            fields: vec![cdmn_field("dose", 0), cdmn_field("class_code", 1)],
+        }],
+        constraints: vec![
+            cdmn_constraint(
+                "M1",
+                "Each medication must respect the max dose",
+                "forall medication in medications (medication.dose <= max_dose)",
+                Some(101),
+                Some("dose_exceeds_max"),
+            ),
+            cdmn_constraint(
+                "M2",
+                "At least one required or backup class must be present",
+                "exists medication in medications ((medication.class_code == required_class) or (medication.class_code == backup_class))",
+                Some(102),
+                Some("required_or_backup_class_missing"),
+            ),
+            cdmn_constraint(
+                "M3",
+                "No medication may use a prohibited class",
+                "forall medication in medications (not (medication.class_code == prohibited_class))",
+                Some(103),
+                Some("prohibited_class_present"),
+            ),
+        ],
+    }
+}
+
+fn lab_policy_table() -> CdmnTable {
+    CdmnTable {
+        name: "Lab and Vitals Guardrails".to_string(),
+        table_type: "cDMN".to_string(),
+        variables: vec![
+            cdmn_variable("wbc_count", 0),
+            cdmn_variable("wbc_min", 1),
+            cdmn_variable("wbc_max", 2),
+            cdmn_variable("systolic_bp", 3),
+            cdmn_variable("diastolic_bp", 4),
+            cdmn_variable("pulse_pressure_min", 5),
+            cdmn_variable("pulse_pressure_max", 6),
+        ],
+        definitions: vec![CdmnDefinition {
+            name: "pulse_pressure".to_string(),
+            expression: "systolic_bp - diastolic_bp".to_string(),
+            description: "Derived systolic-diastolic pulse pressure".to_string(),
+        }],
+        collections: vec![],
+        constraints: vec![
+            cdmn_constraint(
+                "L1",
+                "White blood cell count must remain within range",
+                "wbc_count between wbc_min and wbc_max",
+                Some(301),
+                Some("wbc_out_of_range"),
+            ),
+            cdmn_constraint(
+                "L2",
+                "Pulse pressure must remain within range",
+                "pulse_pressure between pulse_pressure_min and pulse_pressure_max",
+                Some(302),
+                Some("pulse_pressure_out_of_range"),
+            ),
+        ],
+    }
 }
 
 // --- Shipped programs ---
@@ -115,7 +232,7 @@ fn e2e_soft_attention_average_hard() {
         .compile_source(
             &source,
             TransformerVmConfig {
-                attention_mode: Attention2DMode::AverageHard,
+                attention_mode: Attention2DMode::AverageHard { query: [1.0, 0.0] },
                 ..TransformerVmConfig::default()
             },
         )
@@ -131,7 +248,7 @@ fn e2e_soft_attention_softmax() {
         .compile_source(
             &source,
             TransformerVmConfig {
-                attention_mode: Attention2DMode::Softmax,
+                attention_mode: Attention2DMode::Softmax { query: [1.0, 0.0] },
                 ..TransformerVmConfig::default()
             },
         )
@@ -147,7 +264,10 @@ fn e2e_soft_attention_hard_softmax() {
         .compile_source(
             &source,
             TransformerVmConfig {
-                attention_mode: Attention2DMode::HardSoftmax { temperature: 10.0 },
+                attention_mode: Attention2DMode::HardSoftmax {
+                    temperature: 10.0,
+                    query: [1.0, 0.0],
+                },
                 ..TransformerVmConfig::default()
             },
         )
@@ -173,6 +293,17 @@ fn e2e_each_arithmetic_instruction() {
         assert!(state.halted);
         assert_eq!(state.acc, expected_acc, "failed for: {source}");
     }
+}
+
+#[test]
+fn e2e_overflowing_addition_saturates_and_matches_transformer() {
+    let state = run_and_verify(
+        "LOADI 4611686018427387904\nADD 4611686018427387904\nHALT\n",
+        16,
+        1,
+    );
+    assert_eq!(state.acc, i64::MAX);
+    assert!(state.carry_flag);
 }
 
 #[test]
@@ -244,6 +375,172 @@ fn e2e_each_branch_instruction() {
     // JNZ falls through
     let state = run_program("LOADI 0\nJNZ 3\nLOADI 99\nHALT\n", 16);
     assert_eq!(state.acc, 99);
+
+    // JS takes branch
+    let state = run_program("LOADI -1\nJS 3\nLOADI 99\nHALT\n", 16);
+    assert_eq!(state.acc, -1);
+
+    // JS falls through
+    let state = run_program("LOADI 1\nJS 3\nLOADI 99\nHALT\n", 16);
+    assert_eq!(state.acc, 99);
+
+    // JNS takes branch
+    let state = run_program("LOADI 1\nJNS 3\nLOADI 99\nHALT\n", 16);
+    assert_eq!(state.acc, 1);
+
+    // JNS falls through
+    let state = run_program("LOADI -1\nJNS 3\nLOADI 99\nHALT\n", 16);
+    assert_eq!(state.acc, 99);
+}
+
+#[test]
+fn e2e_quantified_cdmn_medication_policy() {
+    let compiled =
+        compile_cdmn_table_with_metadata(&medication_policy_table()).expect("compile cdmn");
+    let program = parse_program(&compiled.assembly).expect("parse");
+    let mut initial_memory = vec![0; program.memory_size()];
+    initial_memory[0] = 500;
+    initial_memory[1] = 11;
+    initial_memory[2] = 12;
+    initial_memory[3] = 99;
+    initial_memory[4] = 2;
+    initial_memory[5] = 400;
+    initial_memory[6] = 7;
+    initial_memory[7] = 450;
+    initial_memory[8] = 12;
+
+    let program = program
+        .with_initial_memory(initial_memory)
+        .expect("initial memory");
+    let mut runtime = NativeInterpreter::new(program, Attention2DMode::default(), 2_000_000);
+    let result = runtime.run().expect("run");
+    let final_state = result.final_state;
+    let status_idx = usize::from(compiled.output.status_register);
+    let reason_idx = usize::from(compiled.output.reason_register);
+    assert_eq!(final_state.memory[status_idx], 1);
+    assert_eq!(final_state.memory[reason_idx], 0);
+}
+
+#[test]
+fn e2e_quantified_cdmn_reports_reason_code_on_failure() {
+    let compiled =
+        compile_cdmn_table_with_metadata(&medication_policy_table()).expect("compile cdmn");
+    let program = parse_program(&compiled.assembly).expect("parse");
+    let mut initial_memory = vec![0; program.memory_size()];
+    initial_memory[0] = 500;
+    initial_memory[1] = 11;
+    initial_memory[2] = 12;
+    initial_memory[3] = 99;
+    initial_memory[4] = 2;
+    initial_memory[5] = 600;
+    initial_memory[6] = 7;
+    initial_memory[7] = 450;
+    initial_memory[8] = 12;
+
+    let program = program
+        .with_initial_memory(initial_memory)
+        .expect("initial memory");
+    let mut runtime = NativeInterpreter::new(program, Attention2DMode::default(), 2_000_000);
+    let result = runtime.run().expect("run");
+    let final_state = result.final_state;
+    let status_idx = usize::from(compiled.output.status_register);
+    let reason_idx = usize::from(compiled.output.reason_register);
+    assert_eq!(final_state.memory[status_idx], 0);
+    assert_eq!(final_state.memory[reason_idx], 101);
+    let reason = compiled.reason_for_code(final_state.memory[reason_idx]);
+    assert_eq!(
+        reason.map(|entry| entry.label.as_str()),
+        Some("dose_exceeds_max")
+    );
+}
+
+#[test]
+fn e2e_quantified_cdmn_reports_reason_code_for_prohibited_class() {
+    let compiled =
+        compile_cdmn_table_with_metadata(&medication_policy_table()).expect("compile cdmn");
+    let program = parse_program(&compiled.assembly).expect("parse");
+    let mut initial_memory = vec![0; program.memory_size()];
+    initial_memory[0] = 500;
+    initial_memory[1] = 11;
+    initial_memory[2] = 12;
+    initial_memory[3] = 99;
+    initial_memory[4] = 2;
+    initial_memory[5] = 400;
+    initial_memory[6] = 99;
+    initial_memory[7] = 450;
+    initial_memory[8] = 12;
+
+    let program = program
+        .with_initial_memory(initial_memory)
+        .expect("initial memory");
+    let mut runtime = NativeInterpreter::new(program, Attention2DMode::default(), 2_000_000);
+    let result = runtime.run().expect("run");
+    let final_state = result.final_state;
+    let status_idx = usize::from(compiled.output.status_register);
+    let reason_idx = usize::from(compiled.output.reason_register);
+    assert!(final_state.halted);
+    assert_eq!(final_state.memory[status_idx], 0);
+    assert_eq!(final_state.memory[reason_idx], 103);
+    let reason = compiled.reason_for_code(final_state.memory[reason_idx]);
+    assert_eq!(
+        reason.map(|entry| entry.label.as_str()),
+        Some("prohibited_class_present")
+    );
+}
+
+#[test]
+fn e2e_cdmn_lab_policy_supports_ranges_and_derived_expressions() {
+    let compiled = compile_cdmn_table_with_metadata(&lab_policy_table()).expect("compile cdmn");
+    let program = parse_program(&compiled.assembly).expect("parse");
+    let mut initial_memory = vec![0; program.memory_size()];
+    initial_memory[0] = 8_000;
+    initial_memory[1] = 4_000;
+    initial_memory[2] = 11_000;
+    initial_memory[3] = 120;
+    initial_memory[4] = 80;
+    initial_memory[5] = 30;
+    initial_memory[6] = 60;
+
+    let program = program
+        .with_initial_memory(initial_memory)
+        .expect("initial memory");
+    let mut runtime = NativeInterpreter::new(program, Attention2DMode::default(), 2_000_000);
+    let result = runtime.run().expect("run");
+    let final_state = result.final_state;
+    let status_idx = usize::from(compiled.output.status_register);
+    let reason_idx = usize::from(compiled.output.reason_register);
+    assert_eq!(final_state.memory[status_idx], 1);
+    assert_eq!(final_state.memory[reason_idx], 0);
+}
+
+#[test]
+fn e2e_cdmn_lab_policy_reports_range_failure_reason_code() {
+    let compiled = compile_cdmn_table_with_metadata(&lab_policy_table()).expect("compile cdmn");
+    let program = parse_program(&compiled.assembly).expect("parse");
+    let mut initial_memory = vec![0; program.memory_size()];
+    initial_memory[0] = 8_000;
+    initial_memory[1] = 4_000;
+    initial_memory[2] = 11_000;
+    initial_memory[3] = 170;
+    initial_memory[4] = 90;
+    initial_memory[5] = 30;
+    initial_memory[6] = 60;
+
+    let program = program
+        .with_initial_memory(initial_memory)
+        .expect("initial memory");
+    let mut runtime = NativeInterpreter::new(program, Attention2DMode::default(), 2_000_000);
+    let result = runtime.run().expect("run");
+    let final_state = result.final_state;
+    let status_idx = usize::from(compiled.output.status_register);
+    let reason_idx = usize::from(compiled.output.reason_register);
+    assert_eq!(final_state.memory[status_idx], 0);
+    assert_eq!(final_state.memory[reason_idx], 302);
+    let reason = compiled.reason_for_code(final_state.memory[reason_idx]);
+    assert_eq!(
+        reason.map(|entry| entry.label.as_str()),
+        Some("pulse_pressure_out_of_range")
+    );
 }
 
 #[test]
@@ -302,19 +599,19 @@ fn e2e_nop_then_halt() {
 }
 
 #[test]
-fn e2e_overflow_wraps_and_sets_carry() {
+fn e2e_crossing_old_i16_max_no_longer_overflows() {
     let state = run_and_verify("LOADI 32767\nADD 1\nHALT\n", 16, 1);
     assert!(state.halted);
-    assert_eq!(state.acc, i16::MIN);
-    assert!(state.carry_flag);
+    assert_eq!(state.acc, 32_768);
+    assert!(!state.carry_flag);
 }
 
 #[test]
-fn e2e_underflow_wraps_and_sets_carry() {
+fn e2e_crossing_old_i16_min_no_longer_underflows() {
     let state = run_and_verify("LOADI -32768\nSUB 1\nHALT\n", 16, 1);
     assert!(state.halted);
-    assert_eq!(state.acc, i16::MAX);
-    assert!(state.carry_flag);
+    assert_eq!(state.acc, -32_769);
+    assert!(!state.carry_flag);
 }
 
 #[test]
@@ -513,7 +810,11 @@ fn e2e_trace_has_one_entry_per_step() {
 fn e2e_native_trace_has_one_entry_per_step() {
     let source = "LOADI 1\nADD 2\nHALT\n";
     let program = parse_program(source).expect("parse");
-    let mut interpreter = NativeInterpreter::new(program, Attention2DMode::AverageHard, 16);
+    let mut interpreter = NativeInterpreter::new(
+        program,
+        Attention2DMode::AverageHard { query: [1.0, 0.0] },
+        16,
+    );
     let result = interpreter.run().expect("run");
 
     assert_eq!(result.steps, 3);

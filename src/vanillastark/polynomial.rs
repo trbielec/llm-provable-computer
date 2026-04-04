@@ -1,4 +1,5 @@
 use super::field::FieldElement;
+use super::ntt::{fast_coset_evaluate, fast_interpolate};
 /// Univariate polynomials over F_p.
 /// Ported from the stark-anatomy Python reference implementation.
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
@@ -88,6 +89,15 @@ impl Polynomial {
         );
         assert!(!domain.is_empty(), "cannot interpolate zero points");
 
+        if domain.len() >= 16 {
+            if let Some((offset, generator)) = geometric_domain(domain) {
+                return fast_coset_interpolate(values, offset, generator);
+            }
+            let root_order = interpolation_root_order(domain.len());
+            let primitive_root = FieldElement::primitive_nth_root(root_order as u128);
+            return fast_interpolate(domain, values, primitive_root, root_order);
+        }
+
         let x = Polynomial::new(vec![FieldElement::zero(), FieldElement::one()]);
         let mut acc = Polynomial::zero();
 
@@ -129,6 +139,9 @@ impl Polynomial {
 
     /// Evaluate the polynomial at every point in the domain.
     pub fn evaluate_domain(&self, domain: &[FieldElement]) -> Vec<FieldElement> {
+        if let Some((offset, generator)) = geometric_domain(domain) {
+            return fast_coset_evaluate(self, offset, generator, domain.len());
+        }
         domain.iter().map(|&d| self.evaluate(d)).collect()
     }
 
@@ -162,6 +175,48 @@ impl Polynomial {
             .collect();
         Polynomial::new(coeffs)
     }
+}
+
+fn geometric_domain(domain: &[FieldElement]) -> Option<(FieldElement, FieldElement)> {
+    if domain.is_empty() || !domain.len().is_power_of_two() || domain[0].is_zero() {
+        return None;
+    }
+    if domain.len() == 1 {
+        return Some((domain[0], FieldElement::one()));
+    }
+
+    let generator = domain[1] / domain[0];
+    if generator.pow(domain.len() as u128) != FieldElement::one() {
+        return None;
+    }
+    if domain.len() > 1 && generator.pow((domain.len() / 2) as u128) == FieldElement::one() {
+        return None;
+    }
+    for (index, point) in domain.iter().enumerate() {
+        if *point != domain[0] * generator.pow(index as u128) {
+            return None;
+        }
+    }
+    Some((domain[0], generator))
+}
+
+fn interpolation_root_order(domain_len: usize) -> usize {
+    ((domain_len.max(2) * 2).next_power_of_two()).max(2)
+}
+
+fn fast_coset_interpolate(
+    values: &[FieldElement],
+    offset: FieldElement,
+    generator: FieldElement,
+) -> Polynomial {
+    let scaled_coefficients = super::ntt::intt(generator, values);
+    let offset_inverse = offset.inverse();
+    let coefficients = scaled_coefficients
+        .into_iter()
+        .enumerate()
+        .map(|(index, coefficient)| coefficient * offset_inverse.pow(index as u128))
+        .collect();
+    Polynomial::new(coefficients)
 }
 
 /// Test whether 3 or more points are colinear (interpolating polynomial has degree exactly 1).
@@ -359,6 +414,29 @@ mod tests {
             domain.len() as isize - 1,
             "interpolate test 3"
         );
+    }
+
+    #[test]
+    fn test_interpolate_on_root_of_unity_domain() {
+        let n = 16usize;
+        let generator = FieldElement::primitive_nth_root(n as u128);
+        let domain: Vec<FieldElement> = (0..n).map(|i| generator.pow(i as u128)).collect();
+        let poly = Polynomial::new((0..8).map(|i| fe(i as u128 + 3)).collect());
+        let values = poly.evaluate_domain(&domain);
+        let interpolated = Polynomial::interpolate_domain(&domain, &values);
+        assert_eq!(interpolated, poly);
+    }
+
+    #[test]
+    fn test_interpolate_on_coset_domain() {
+        let n = 16usize;
+        let generator = FieldElement::primitive_nth_root(n as u128);
+        let offset = fe(7);
+        let domain: Vec<FieldElement> = (0..n).map(|i| offset * generator.pow(i as u128)).collect();
+        let poly = Polynomial::new((0..6).map(|i| fe(i as u128 * 5 + 1)).collect());
+        let values = poly.evaluate_domain(&domain);
+        let interpolated = Polynomial::interpolate_domain(&domain, &values);
+        assert_eq!(interpolated, poly);
     }
 
     #[test]

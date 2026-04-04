@@ -75,11 +75,21 @@ def validate_stack_precondition(instruction: Any, sp: int, memory_size: int) -> 
 
 
 def parse_attention_mode(raw_mode: Any) -> tuple[str, float | None]:
-    if raw_mode == "AverageHard":
+    if isinstance(raw_mode, str):
+        if raw_mode.startswith("AverageHard"):
+            return ("average_hard", None)
+        if raw_mode.startswith("Softmax"):
+            return ("softmax", 1.0)
+        return (raw_mode, None)
+
+    if not isinstance(raw_mode, dict):
+        raise ValidationError(f"unsupported attention mode encoding: {raw_mode!r}")
+
+    if "AverageHard" in raw_mode:
         return ("average_hard", None)
-    if raw_mode == "Softmax":
+    if "Softmax" in raw_mode:
         return ("softmax", 1.0)
-    if isinstance(raw_mode, dict) and "HardSoftmax" in raw_mode:
+    if "HardSoftmax" in raw_mode:
         payload = raw_mode["HardSoftmax"]
         if not isinstance(payload, dict) or "temperature" not in payload:
             raise ValidationError(f"invalid HardSoftmax payload: {payload!r}")

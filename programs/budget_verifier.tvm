@@ -1,0 +1,49 @@
+# Auto-compiled TVM Verifier from cDMN Logic
+.memory 8
+
+verify_start:
+  # Constraint C1: Total spend must not exceed budget
+  LOAD 0
+  STORE 4
+  LOAD 1
+  ADDM 4
+  STORE 3
+  LOAD 2
+  STORE 4
+  LOAD 3
+  SUBM 4
+  JS cmp_le_ok_0
+  JZ cmp_le_ok_0
+  JMP constraint_fail_0
+cmp_le_ok_0:
+  # Constraint C2: R&D must be exactly twice marketing
+  LOAD 1
+  STORE 3
+  LOADI 2
+  STORE 5
+  LOAD 0
+  MULM 5
+  STORE 4
+  LOAD 3
+  SUBM 4
+  JNZ constraint_fail_1
+
+  LOADI 1
+  STORE 6
+  LOADI 0
+  STORE 7
+  HALT
+
+constraint_fail_0:
+  LOADI 0
+  STORE 6
+  LOADI 1
+  STORE 7
+  HALT
+
+constraint_fail_1:
+  LOADI 0
+  STORE 6
+  LOADI 2
+  STORE 7
+  HALT

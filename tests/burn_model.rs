@@ -92,7 +92,10 @@ fn burn_verifies_against_native_engines_for_shipped_programs() {
             "programs/soft_attention_memory.tvm",
             32,
             TransformerVmConfig {
-                attention_mode: Attention2DMode::HardSoftmax { temperature: 10.0 },
+                attention_mode: Attention2DMode::HardSoftmax {
+                    temperature: 10.0,
+                    query: [1.0, 0.0],
+                },
                 ..TransformerVmConfig::default()
             },
             4,

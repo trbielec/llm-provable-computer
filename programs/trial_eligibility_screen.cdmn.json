@@ -1,0 +1,65 @@
+{
+  "name": "Clinical Trial Eligibility Screen",
+  "type": "cDMN",
+  "variables": [
+    { "name": "age", "memory": 0 },
+    { "name": "min_age", "memory": 1 },
+    { "name": "max_age", "memory": 2 },
+    { "name": "hemoglobin", "memory": 3 },
+    { "name": "min_hemoglobin", "memory": 4 },
+    { "name": "excluded_diagnosis", "memory": 5 },
+    { "name": "required_therapy_class", "memory": 6 }
+  ],
+  "collections": [
+    {
+      "name": "diagnoses",
+      "count_memory": 7,
+      "base_memory": 8,
+      "stride": 1,
+      "max_items": 3,
+      "fields": [
+        { "name": "code", "offset": 0 }
+      ]
+    },
+    {
+      "name": "therapies",
+      "count_memory": 11,
+      "base_memory": 12,
+      "stride": 1,
+      "max_items": 3,
+      "fields": [
+        { "name": "class_code", "offset": 0 }
+      ]
+    }
+  ],
+  "constraints": [
+    {
+      "id": "TE1",
+      "description": "Participant age must be within the eligibility window",
+      "logic": "age between min_age and max_age",
+      "reason_code": 451,
+      "reason_label": "age_out_of_window"
+    },
+    {
+      "id": "TE2",
+      "description": "Hemoglobin must satisfy the baseline threshold",
+      "logic": "hemoglobin >= min_hemoglobin",
+      "reason_code": 452,
+      "reason_label": "hemoglobin_below_threshold"
+    },
+    {
+      "id": "TE3",
+      "description": "Excluded diagnoses must not be present",
+      "logic": "forall diagnosis in diagnoses (not (diagnosis.code == excluded_diagnosis))",
+      "reason_code": 453,
+      "reason_label": "excluded_diagnosis_present"
+    },
+    {
+      "id": "TE4",
+      "description": "At least one prior therapy from the required class must be documented",
+      "logic": "exists therapy in therapies (therapy.class_code == required_therapy_class)",
+      "reason_code": 454,
+      "reason_label": "required_prior_therapy_missing"
+    }
+  ]
+}

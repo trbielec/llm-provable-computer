@@ -1215,7 +1215,7 @@ fn proof_eligibility_panel(
 ) -> Paragraph<'static> {
     let attention_supported = matches!(
         runtime.model().config().attention_mode,
-        Attention2DMode::AverageHard
+        Attention2DMode::AverageHard { query: [1.0, 0.0] }
     );
     let static_support = validate_execution_stark_support(
         runtime.model().program(),
@@ -2255,9 +2255,11 @@ fn instruction_mood(instruction: Instruction) -> &'static str {
         | Instruction::CmpImmediate(_)
         | Instruction::CmpMemory(_) => "logic panels snapping into place",
         Instruction::Call(_) | Instruction::Ret => "subroutines looping through the catwalk",
-        Instruction::Jump(_) | Instruction::JumpIfZero(_) | Instruction::JumpIfNotZero(_) => {
-            "branch work with a dramatic turn"
-        }
+        Instruction::Jump(_)
+        | Instruction::JumpIfZero(_)
+        | Instruction::JumpIfNotZero(_)
+        | Instruction::JumpIfSign(_)
+        | Instruction::JumpIfNotSign(_) => "branch work with a dramatic turn",
         Instruction::Halt => "the finale lands and holds",
         Instruction::Nop => "holding the pose without drift",
     }
@@ -2417,7 +2419,7 @@ mod tests {
     fn proof_availability_is_ready_before_preview_halts() {
         let runtime = runtime_for(
             Program::new(vec![Instruction::LoadImmediate(1), Instruction::Halt], 4),
-            Attention2DMode::AverageHard,
+            Attention2DMode::AverageHard { query: [1.0, 0.0] },
             8,
         );
 
@@ -2431,7 +2433,7 @@ mod tests {
     fn proof_availability_is_ready_after_supported_halted_run() {
         let mut runtime = runtime_for(
             Program::new(vec![Instruction::LoadImmediate(1), Instruction::Halt], 4),
-            Attention2DMode::AverageHard,
+            Attention2DMode::AverageHard { query: [1.0, 0.0] },
             8,
         );
 
@@ -2448,13 +2450,13 @@ mod tests {
         let mut runtime = runtime_for(
             Program::new(
                 vec![
-                    Instruction::LoadImmediate(i16::MAX),
-                    Instruction::AddImmediate(1),
+                    Instruction::LoadImmediate(9_000_000_000_000_000_000),
+                    Instruction::AddImmediate(500_000_000_000_000_000),
                     Instruction::Halt,
                 ],
                 4,
             ),
-            Attention2DMode::AverageHard,
+            Attention2DMode::AverageHard { query: [1.0, 0.0] },
             8,
         );
 
@@ -2472,7 +2474,7 @@ mod tests {
     fn proof_availability_blocks_unsupported_attention_modes() {
         let mut runtime = runtime_for(
             Program::new(vec![Instruction::LoadImmediate(1), Instruction::Halt], 4),
-            Attention2DMode::Softmax,
+            Attention2DMode::Softmax { query: [1.0, 0.0] },
             8,
         );
 
@@ -2490,7 +2492,7 @@ mod tests {
     fn initial_proof_budget_has_floor_above_small_preview_limits() {
         let runtime = runtime_for(
             Program::new(vec![Instruction::LoadImmediate(1), Instruction::Halt], 4),
-            Attention2DMode::AverageHard,
+            Attention2DMode::AverageHard { query: [1.0, 0.0] },
             64,
         );
 

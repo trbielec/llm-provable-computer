@@ -1,14 +1,15 @@
-use crate::config::{Attention2DMode, TransformerVmConfig};
+use serde::{Deserialize, Serialize};
+
+use crate::config::{Attention2DMode, TransformerVmConfig, MIN_FF_DIM};
 use crate::error::{Result, VmError};
 use crate::instruction::{Instruction, Program};
 use crate::memory::AddressedMemory;
-use crate::state::{decode_state, encode_state, MachineState};
+use crate::state::{decode_state, encode_state, MachineState, Word, WORD_BITS};
 
 pub(crate) type Scalar = f64;
 
-pub(crate) const INPUT_DIM: usize = 41;
+pub(crate) const INPUT_DIM: usize = 9 + 2 * WORD_BITS;
 pub(crate) const OUTPUT_DIM: usize = 6;
-const MIN_COMPILED_FF_DIM: usize = 49;
 
 const IN_CONST: usize = 0;
 const IN_PC: usize = 1;
@@ -20,7 +21,7 @@ const IN_HALTED: usize = 6;
 const IN_SP: usize = 7;
 const IN_OPERAND: usize = 8;
 const ACC_BITS_START: usize = 9;
-const OPERAND_BITS_START: usize = 25;
+const OPERAND_BITS_START: usize = ACC_BITS_START + WORD_BITS;
 
 const OUT_NEXT_PC: usize = 0;
 const OUT_RAW_ACC: usize = 1;
@@ -45,13 +46,21 @@ fn bool_to_scalar(value: bool) -> Scalar {
     }
 }
 
+fn word_to_scalar(value: Word) -> Scalar {
+    value as Scalar
+}
+
 fn bit_weight(bit: usize) -> Scalar {
-    ((1u32) << bit) as Scalar
+    if bit + 1 == WORD_BITS {
+        -(((1u128) << bit) as Scalar)
+    } else {
+        ((1u128) << bit) as Scalar
+    }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct AttentionContext {
-    pub memory_value: Option<i16>,
+    pub memory_value: Option<Word>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -119,15 +128,144 @@ impl MultiHead2DAttention {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Transition {
     pub(crate) pc: i64,
-    pub(crate) acc: i16,
+    pub(crate) acc: Word,
     pub(crate) sp: i64,
     pub(crate) zero_flag: bool,
     pub(crate) carry_flag: bool,
     pub(crate) halted: bool,
-    pub(crate) memory_write: Option<(i64, i16)>,
+    pub(crate) memory_write: Option<(i64, Word)>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SharedTransformerTransitionWitness {
+    pub pc: i64,
+    pub acc: Word,
+    pub sp: i64,
+    pub zero_flag: bool,
+    pub carry_flag: bool,
+    pub halted: bool,
+    pub memory_write: Option<(i64, Word)>,
+}
+
+impl From<Transition> for SharedTransformerTransitionWitness {
+    fn from(value: Transition) -> Self {
+        Self {
+            pc: value.pc,
+            acc: value.acc,
+            sp: value.sp,
+            zero_flag: value.zero_flag,
+            carry_flag: value.carry_flag,
+            halted: value.halted,
+            memory_write: value.memory_write,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SharedTransformerStepWitness {
+    pub step_number: usize,
+    pub pre_state: MachineState,
+    pub input_token: Vec<f32>,
+    pub decoded_state: MachineState,
+    pub dispatch: DispatchInfo,
+    pub operand: Word,
+    pub input_vector: Vec<f64>,
+    pub ff_gate: Vec<f64>,
+    pub ff_value: Vec<f64>,
+    pub ff_hidden: Vec<f64>,
+    pub ff_output: Vec<f64>,
+    pub transition: SharedTransformerTransitionWitness,
+    pub post_write_state: MachineState,
+    pub output_token: Vec<f32>,
+    pub final_state: MachineState,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SharedTransformerExecutionWitness {
+    pub initial_state: MachineState,
+    pub steps: Vec<SharedTransformerStepWitness>,
+    pub final_state: MachineState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SharedTransformerExactDomainViolation {
+    pub step_number: usize,
+    pub location: String,
+    pub value_repr: String,
+}
+
+impl SharedTransformerStepWitness {
+    pub fn exact_domain_violations(&self) -> Vec<SharedTransformerExactDomainViolation> {
+        let mut violations = Vec::new();
+
+        for (index, value) in self.input_token.iter().copied().enumerate() {
+            if !matches!(value, -1.0 | 0.0 | 1.0) {
+                violations.push(SharedTransformerExactDomainViolation {
+                    step_number: self.step_number,
+                    location: format!("input_token[{index}]"),
+                    value_repr: value.to_string(),
+                });
+            }
+        }
+
+        for (index, value) in self.output_token.iter().copied().enumerate() {
+            if !matches!(value, -1.0 | 0.0 | 1.0) {
+                violations.push(SharedTransformerExactDomainViolation {
+                    step_number: self.step_number,
+                    location: format!("output_token[{index}]"),
+                    value_repr: value.to_string(),
+                });
+            }
+        }
+
+        exact_integer_violations(
+            self.step_number,
+            "input_vector",
+            &self.input_vector,
+            &mut violations,
+        );
+        exact_integer_violations(self.step_number, "ff_gate", &self.ff_gate, &mut violations);
+        exact_integer_violations(
+            self.step_number,
+            "ff_value",
+            &self.ff_value,
+            &mut violations,
+        );
+        exact_integer_violations(
+            self.step_number,
+            "ff_hidden",
+            &self.ff_hidden,
+            &mut violations,
+        );
+        exact_integer_violations(
+            self.step_number,
+            "ff_output",
+            &self.ff_output,
+            &mut violations,
+        );
+
+        violations
+    }
+
+    pub fn is_exact_discrete(&self) -> bool {
+        self.exact_domain_violations().is_empty()
+    }
+}
+
+impl SharedTransformerExecutionWitness {
+    pub fn exact_domain_violations(&self) -> Vec<SharedTransformerExactDomainViolation> {
+        self.steps
+            .iter()
+            .flat_map(SharedTransformerStepWitness::exact_domain_violations)
+            .collect()
+    }
+
+    pub fn is_exact_discrete(&self) -> bool {
+        self.exact_domain_violations().is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Matrix {
     pub(crate) rows: usize,
     pub(crate) cols: usize,
@@ -161,7 +299,7 @@ impl Matrix {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct FeedForwardWeights {
     pub(crate) gate: Matrix,
     pub(crate) gate_bias: Vec<Scalar>,
@@ -171,8 +309,24 @@ pub(crate) struct FeedForwardWeights {
     pub(crate) out_bias: Vec<Scalar>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct FeedForwardEvaluation {
+    pub(crate) gate: Vec<Scalar>,
+    pub(crate) value: Vec<Scalar>,
+    pub(crate) hidden: Vec<Scalar>,
+    pub(crate) output: Vec<Scalar>,
+}
+
 impl FeedForwardWeights {
+    #[cfg_attr(
+        not(any(test, feature = "burn-model", feature = "onnx-export")),
+        allow(dead_code)
+    )]
     pub(crate) fn evaluate(&self, input: &[Scalar]) -> Vec<Scalar> {
+        self.evaluate_with_hidden(input).output
+    }
+
+    pub(crate) fn evaluate_with_hidden(&self, input: &[Scalar]) -> FeedForwardEvaluation {
         let gate = self
             .gate
             .mul_vec(input)
@@ -188,17 +342,25 @@ impl FeedForwardWeights {
             .map(|(value, bias)| value + bias)
             .collect::<Vec<_>>();
         let hidden = gate
-            .into_iter()
-            .zip(value)
+            .iter()
+            .zip(value.iter())
             .map(|(left, right)| left * right)
             .collect::<Vec<_>>();
 
-        self.out
+        let output = self
+            .out
             .mul_vec(&hidden)
             .into_iter()
             .zip(self.out_bias.iter())
             .map(|(value, bias)| value + bias)
-            .collect()
+            .collect();
+
+        FeedForwardEvaluation {
+            gate,
+            value,
+            hidden,
+            output,
+        }
     }
 }
 
@@ -361,7 +523,7 @@ pub(crate) struct CompiledInstruction {
     pub(crate) controls: TransitionControls,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DispatchInfo {
     pub instruction: Instruction,
     pub layer_idx: usize,
@@ -370,17 +532,50 @@ pub struct DispatchInfo {
 #[derive(Debug, Clone)]
 pub struct GatedFeedForward;
 
+#[derive(Debug, Clone)]
+struct ForwardPassArtifacts {
+    operand: Word,
+    input_vector: Vec<Scalar>,
+    ff_gate: Vec<Scalar>,
+    ff_value: Vec<Scalar>,
+    ff_hidden: Vec<Scalar>,
+    ff_output: Vec<Scalar>,
+    transition: Transition,
+}
+
 impl GatedFeedForward {
+    #[cfg_attr(not(test), allow(dead_code))]
     fn apply(
         &self,
         state: &MachineState,
         compiled: &CompiledInstruction,
         attention: AttentionContext,
     ) -> Transition {
+        self.apply_with_artifacts(state, compiled, attention)
+            .transition
+    }
+
+    fn apply_with_artifacts(
+        &self,
+        state: &MachineState,
+        compiled: &CompiledInstruction,
+        attention: AttentionContext,
+    ) -> ForwardPassArtifacts {
         let operand = attention.memory_value.unwrap_or_default();
-        let input = build_input_vector(state, operand);
-        let output = compiled.ff_weights.evaluate(&input);
-        transition_from_output(state, operand, &compiled.controls, &output)
+        let input_vector = build_input_vector(state, operand);
+        let evaluation = compiled.ff_weights.evaluate_with_hidden(&input_vector);
+        let transition =
+            transition_from_output(state, operand, &compiled.controls, &evaluation.output);
+
+        ForwardPassArtifacts {
+            operand,
+            input_vector,
+            ff_gate: evaluation.gate,
+            ff_value: evaluation.value,
+            ff_hidden: evaluation.hidden,
+            ff_output: evaluation.output,
+            transition,
+        }
     }
 }
 
@@ -391,9 +586,9 @@ pub(crate) struct InstructionCompiler {
 
 impl InstructionCompiler {
     pub(crate) fn new(config: &TransformerVmConfig) -> Result<Self> {
-        if config.ff_dim < MIN_COMPILED_FF_DIM {
+        if config.ff_dim < MIN_FF_DIM {
             return Err(VmError::InvalidConfig(format!(
-                "ff_dim must be at least {MIN_COMPILED_FF_DIM} to compile the extended ISA, got {}",
+                "ff_dim must be at least {MIN_FF_DIM} to compile the extended ISA, got {}",
                 config.ff_dim
             )));
         }
@@ -446,6 +641,10 @@ impl InstructionCompiler {
             Instruction::JumpIfNotZero(target) => {
                 self.compile_jump_if_not_zero(instruction, target)
             }
+            Instruction::JumpIfSign(target) => self.compile_jump_if_sign(instruction, target),
+            Instruction::JumpIfNotSign(target) => {
+                self.compile_jump_if_not_sign(instruction, target)
+            }
             Instruction::Halt => self.compile_halt(instruction),
         }
     }
@@ -474,12 +673,12 @@ impl InstructionCompiler {
     fn compile_load_immediate(
         &self,
         instruction: Instruction,
-        value: i16,
+        value: Word,
     ) -> Result<CompiledInstruction> {
         let mut builder = self.builder();
         self.preserve_sp(&mut builder)?;
         builder.emit_linear(OUT_NEXT_PC, 1.0, IN_PC_NEXT)?;
-        builder.add_output_bias(OUT_RAW_ACC, Scalar::from(value));
+        builder.add_output_bias(OUT_RAW_ACC, word_to_scalar(value));
         self.finish(
             instruction,
             MemoryRead::None,
@@ -564,13 +763,13 @@ impl InstructionCompiler {
     fn compile_add_immediate(
         &self,
         instruction: Instruction,
-        value: i16,
+        value: Word,
     ) -> Result<CompiledInstruction> {
         let mut builder = self.builder();
         self.preserve_sp(&mut builder)?;
         builder.emit_linear(OUT_NEXT_PC, 1.0, IN_PC_NEXT)?;
         builder.emit_linear(OUT_RAW_ACC, 1.0, IN_ACC)?;
-        builder.add_output_bias(OUT_RAW_ACC, Scalar::from(value));
+        builder.add_output_bias(OUT_RAW_ACC, word_to_scalar(value));
         self.finish(
             instruction,
             MemoryRead::None,
@@ -600,13 +799,13 @@ impl InstructionCompiler {
     fn compile_sub_immediate(
         &self,
         instruction: Instruction,
-        value: i16,
+        value: Word,
     ) -> Result<CompiledInstruction> {
         let mut builder = self.builder();
         self.preserve_sp(&mut builder)?;
         builder.emit_linear(OUT_NEXT_PC, 1.0, IN_PC_NEXT)?;
         builder.emit_linear(OUT_RAW_ACC, 1.0, IN_ACC)?;
-        builder.add_output_bias(OUT_RAW_ACC, -Scalar::from(value));
+        builder.add_output_bias(OUT_RAW_ACC, -word_to_scalar(value));
         self.finish(
             instruction,
             MemoryRead::None,
@@ -636,12 +835,12 @@ impl InstructionCompiler {
     fn compile_mul_immediate(
         &self,
         instruction: Instruction,
-        value: i16,
+        value: Word,
     ) -> Result<CompiledInstruction> {
         let mut builder = self.builder();
         self.preserve_sp(&mut builder)?;
         builder.emit_linear(OUT_NEXT_PC, 1.0, IN_PC_NEXT)?;
-        builder.emit_linear(OUT_RAW_ACC, Scalar::from(value), IN_ACC)?;
+        builder.emit_linear(OUT_RAW_ACC, word_to_scalar(value), IN_ACC)?;
         self.finish(
             instruction,
             MemoryRead::None,
@@ -670,15 +869,15 @@ impl InstructionCompiler {
     fn compile_bitwise_immediate(
         &self,
         instruction: Instruction,
-        value: i16,
+        value: Word,
         op: BitwiseOp,
     ) -> Result<CompiledInstruction> {
         let mut builder = self.builder();
         self.preserve_sp(&mut builder)?;
         builder.emit_linear(OUT_NEXT_PC, 1.0, IN_PC_NEXT)?;
-        let rhs_bits = value as u16;
+        let rhs_bits = value as u64;
 
-        for bit in 0..16 {
+        for bit in 0..WORD_BITS {
             let coeff = bit_weight(bit);
             let rhs_bit = ((rhs_bits >> bit) & 1) == 1;
             match op {
@@ -718,7 +917,7 @@ impl InstructionCompiler {
         self.preserve_sp(&mut builder)?;
         builder.emit_linear(OUT_NEXT_PC, 1.0, IN_PC_NEXT)?;
 
-        for bit in 0..16 {
+        for bit in 0..WORD_BITS {
             let coeff = bit_weight(bit);
             match op {
                 BitwiseOp::And => {
@@ -753,18 +952,18 @@ impl InstructionCompiler {
     fn compile_cmp_immediate(
         &self,
         instruction: Instruction,
-        value: i16,
+        value: Word,
     ) -> Result<CompiledInstruction> {
         let mut builder = self.builder();
         self.preserve_sp(&mut builder)?;
         builder.emit_linear(OUT_NEXT_PC, 1.0, IN_PC_NEXT)?;
         builder.emit_linear(OUT_RAW_ACC, 1.0, IN_ACC)?;
-        builder.add_output_bias(OUT_RAW_ACC, -Scalar::from(value));
+        builder.add_output_bias(OUT_RAW_ACC, -word_to_scalar(value));
         self.finish(
             instruction,
             MemoryRead::None,
             builder,
-            compare_controls(Scalar::from(value), 0.0),
+            compare_controls(word_to_scalar(value), 0.0),
         )
     }
 
@@ -869,6 +1068,46 @@ impl InstructionCompiler {
         )
     }
 
+    fn compile_jump_if_sign(
+        &self,
+        instruction: Instruction,
+        target: u8,
+    ) -> Result<CompiledInstruction> {
+        let mut builder = self.builder();
+        self.preserve_sp(&mut builder)?;
+        let sign_bit = acc_bit(WORD_BITS - 1);
+        builder.emit_linear(OUT_NEXT_PC, 1.0, IN_PC_NEXT)?;
+        builder.emit_linear(OUT_NEXT_PC, Scalar::from(target), sign_bit)?;
+        builder.emit_product(OUT_NEXT_PC, -1.0, sign_bit, IN_PC_NEXT)?;
+        builder.emit_linear(OUT_RAW_ACC, 1.0, IN_ACC)?;
+        self.finish(
+            instruction,
+            MemoryRead::None,
+            builder,
+            TransitionControls::preserve(),
+        )
+    }
+
+    fn compile_jump_if_not_sign(
+        &self,
+        instruction: Instruction,
+        target: u8,
+    ) -> Result<CompiledInstruction> {
+        let mut builder = self.builder();
+        self.preserve_sp(&mut builder)?;
+        let sign_bit = acc_bit(WORD_BITS - 1);
+        builder.add_output_bias(OUT_NEXT_PC, Scalar::from(target));
+        builder.emit_linear(OUT_NEXT_PC, -Scalar::from(target), sign_bit)?;
+        builder.emit_product(OUT_NEXT_PC, 1.0, sign_bit, IN_PC_NEXT)?;
+        builder.emit_linear(OUT_RAW_ACC, 1.0, IN_ACC)?;
+        self.finish(
+            instruction,
+            MemoryRead::None,
+            builder,
+            TransitionControls::preserve(),
+        )
+    }
+
     fn compile_halt(&self, instruction: Instruction) -> Result<CompiledInstruction> {
         let mut builder = self.builder();
         self.preserve_sp(&mut builder)?;
@@ -948,17 +1187,17 @@ fn compare_controls(rhs_constant: Scalar, rhs_operand_weight: Scalar) -> Transit
 
 pub(crate) fn transition_from_output(
     state: &MachineState,
-    operand: i16,
+    operand: Word,
     controls: &TransitionControls,
     output: &[Scalar],
 ) -> Transition {
-    let raw_acc = output[OUT_RAW_ACC].round() as i64;
-    let acc = raw_acc as i16;
+    let raw_acc = output[OUT_RAW_ACC].round();
+    let acc = raw_acc as Word;
     let result_zero = acc == 0;
-    let overflow = raw_acc < i16::MIN as i64 || raw_acc > i16::MAX as i64;
+    let overflow = overflowed_raw_acc_scalar(raw_acc);
     let compare_rhs = (controls.carry.rhs_constant
-        + controls.carry.rhs_operand_weight * Scalar::from(operand))
-    .round() as i16;
+        + controls.carry.rhs_operand_weight * word_to_scalar(operand))
+    .round() as Word;
     let less_than = state.acc < compare_rhs;
 
     Transition {
@@ -984,32 +1223,37 @@ pub(crate) fn transition_from_output(
         memory_write: (output[OUT_MEM_WRITE_ENABLE] >= 0.5).then(|| {
             (
                 output[OUT_MEM_WRITE_ADDR].round() as i64,
-                output[OUT_MEM_WRITE_VALUE].round() as i64 as i16,
+                output[OUT_MEM_WRITE_VALUE].round() as Word,
             )
         }),
     }
 }
 
-pub(crate) fn build_input_vector(state: &MachineState, operand: i16) -> Vec<Scalar> {
+pub(crate) fn build_input_vector(state: &MachineState, operand: Word) -> Vec<Scalar> {
     let mut input = vec![0.0; INPUT_DIM];
     input[IN_CONST] = 1.0;
     input[IN_PC] = Scalar::from(state.pc);
     input[IN_PC_NEXT] = Scalar::from(state.pc.wrapping_add(1));
-    input[IN_ACC] = Scalar::from(state.acc);
+    input[IN_ACC] = word_to_scalar(state.acc);
     input[IN_ZERO] = bool_to_scalar(state.zero_flag);
     input[IN_CARRY] = bool_to_scalar(state.carry_flag);
     input[IN_HALTED] = bool_to_scalar(state.halted);
     input[IN_SP] = Scalar::from(state.sp);
-    input[IN_OPERAND] = Scalar::from(operand);
+    input[IN_OPERAND] = word_to_scalar(operand);
 
-    let acc_bits = state.acc as u16;
-    let operand_bits = operand as u16;
-    for bit in 0..16 {
+    let acc_bits = state.acc as u64;
+    let operand_bits = operand as u64;
+    for bit in 0..WORD_BITS {
         input[acc_bit(bit)] = bool_to_scalar(((acc_bits >> bit) & 1) == 1);
         input[operand_bit(bit)] = bool_to_scalar(((operand_bits >> bit) & 1) == 1);
     }
 
     input
+}
+
+fn overflowed_raw_acc_scalar(raw_acc: Scalar) -> bool {
+    let upper_bound_exclusive = (i128::from(Word::MAX) + 1) as Scalar;
+    !raw_acc.is_finite() || raw_acc < Word::MIN as Scalar || raw_acc >= upper_bound_exclusive
 }
 
 pub(crate) fn blend_bool(value: Scalar) -> bool {
@@ -1018,6 +1262,30 @@ pub(crate) fn blend_bool(value: Scalar) -> bool {
 
 pub(crate) fn checked_transition_u8(field: &'static str, value: i64) -> Result<u8> {
     u8::try_from(value).map_err(|_| VmError::InvalidTransitionField { field, value })
+}
+
+fn witness_mismatch(step: usize, message: impl Into<String>) -> VmError {
+    VmError::ExecutionMismatch {
+        step,
+        message: message.into(),
+    }
+}
+
+fn exact_integer_violations(
+    step_number: usize,
+    location: &str,
+    values: &[Scalar],
+    violations: &mut Vec<SharedTransformerExactDomainViolation>,
+) {
+    for (index, value) in values.iter().copied().enumerate() {
+        if !value.is_finite() || value.fract() != 0.0 {
+            violations.push(SharedTransformerExactDomainViolation {
+                step_number,
+                location: format!("{location}[{index}]"),
+                value_repr: value.to_string(),
+            });
+        }
+    }
 }
 
 pub(crate) fn validate_stack_pointer(sp: u8, memory_size: usize) -> Result<()> {
@@ -1079,10 +1347,14 @@ impl TransformerVmBlock {
             })
     }
 
-    fn forward(&self, state: &MachineState, memory: &AddressedMemory) -> Result<Transition> {
+    fn forward_with_artifacts(
+        &self,
+        state: &MachineState,
+        memory: &AddressedMemory,
+    ) -> Result<ForwardPassArtifacts> {
         let compiled = self.compiled_instruction(state.pc)?;
         let context = self.attention.gather(state, compiled.memory_read, memory)?;
-        Ok(self.ff.apply(state, compiled, context))
+        Ok(self.ff.apply_with_artifacts(state, compiled, context))
     }
 }
 
@@ -1175,8 +1447,44 @@ impl TransformerVm {
         memory: &mut AddressedMemory,
         step_number: usize,
     ) -> Result<MachineState> {
+        Ok(self
+            .step_with_witness(state, memory, step_number)?
+            .final_state)
+    }
+
+    pub fn step_with_witness(
+        &self,
+        state: &MachineState,
+        memory: &mut AddressedMemory,
+        step_number: usize,
+    ) -> Result<SharedTransformerStepWitness> {
         if state.halted {
-            return Ok(state.clone());
+            let input_token = encode_state(state, self.config.d_model)?;
+            return Ok(SharedTransformerStepWitness {
+                step_number,
+                pre_state: state.clone(),
+                input_token: input_token.clone(),
+                decoded_state: state.clone(),
+                dispatch: self.dispatch_info(state.pc)?,
+                operand: 0,
+                input_vector: build_input_vector(state, 0),
+                ff_gate: Vec::new(),
+                ff_value: Vec::new(),
+                ff_hidden: Vec::new(),
+                ff_output: Vec::new(),
+                transition: SharedTransformerTransitionWitness {
+                    pc: i64::from(state.pc),
+                    acc: state.acc,
+                    sp: i64::from(state.sp),
+                    zero_flag: state.zero_flag,
+                    carry_flag: state.carry_flag,
+                    halted: state.halted,
+                    memory_write: None,
+                },
+                post_write_state: state.clone(),
+                output_token: input_token,
+                final_state: state.clone(),
+            });
         }
 
         let input_token = encode_state(state, self.config.d_model)?;
@@ -1184,7 +1492,8 @@ impl TransformerVm {
         let dispatch = self.dispatch_info(decoded.pc)?;
         validate_stack_pointer(decoded.sp, memory.len())?;
         validate_stack_precondition(dispatch.instruction, decoded.sp, memory.len())?;
-        let transition = self.blocks[dispatch.layer_idx].forward(&decoded, memory)?;
+        let artifacts = self.blocks[dispatch.layer_idx].forward_with_artifacts(&decoded, memory)?;
+        let transition = artifacts.transition;
 
         if let Some((address, value)) = transition.memory_write {
             let address = checked_transition_u8("memory address", address)?;
@@ -1206,7 +1515,148 @@ impl TransformerVm {
         };
 
         let output_token = encode_state(&next_state, self.config.d_model)?;
-        decode_state(&output_token, next_state.memory)
+        let final_state = decode_state(&output_token, next_state.memory.clone())?;
+
+        Ok(SharedTransformerStepWitness {
+            step_number,
+            pre_state: state.clone(),
+            input_token,
+            decoded_state: decoded,
+            dispatch,
+            operand: artifacts.operand,
+            input_vector: artifacts.input_vector,
+            ff_gate: artifacts.ff_gate,
+            ff_value: artifacts.ff_value,
+            ff_hidden: artifacts.ff_hidden,
+            ff_output: artifacts.ff_output,
+            transition: transition.into(),
+            post_write_state: next_state,
+            output_token,
+            final_state,
+        })
+    }
+
+    pub fn replay_step_witness(
+        &self,
+        witness: &SharedTransformerStepWitness,
+    ) -> Result<MachineState> {
+        let input_token = encode_state(&witness.pre_state, self.config.d_model)?;
+        if input_token != witness.input_token {
+            return Err(witness_mismatch(
+                witness.step_number,
+                "input token does not match shared encode_state output",
+            ));
+        }
+
+        let decoded = decode_state(&input_token, witness.pre_state.memory.clone())?;
+        if decoded != witness.decoded_state {
+            return Err(witness_mismatch(
+                witness.step_number,
+                "decoded input state does not match witness",
+            ));
+        }
+
+        let dispatch = self.dispatch_info(decoded.pc)?;
+        if dispatch != witness.dispatch {
+            return Err(witness_mismatch(
+                witness.step_number,
+                "dispatch info does not match witness",
+            ));
+        }
+
+        let mut memory = AddressedMemory::from_initial(&witness.pre_state.memory);
+        validate_stack_pointer(decoded.sp, memory.len())?;
+        validate_stack_precondition(dispatch.instruction, decoded.sp, memory.len())?;
+
+        let artifacts =
+            self.blocks[dispatch.layer_idx].forward_with_artifacts(&decoded, &memory)?;
+        if artifacts.operand != witness.operand {
+            return Err(witness_mismatch(
+                witness.step_number,
+                "attention-derived operand does not match witness",
+            ));
+        }
+        if artifacts.input_vector != witness.input_vector {
+            return Err(witness_mismatch(
+                witness.step_number,
+                "input vector does not match witness",
+            ));
+        }
+        if artifacts.ff_gate != witness.ff_gate {
+            return Err(witness_mismatch(
+                witness.step_number,
+                "feed-forward gate activations do not match witness",
+            ));
+        }
+        if artifacts.ff_value != witness.ff_value {
+            return Err(witness_mismatch(
+                witness.step_number,
+                "feed-forward value activations do not match witness",
+            ));
+        }
+        if artifacts.ff_hidden != witness.ff_hidden {
+            return Err(witness_mismatch(
+                witness.step_number,
+                "feed-forward hidden activations do not match witness",
+            ));
+        }
+        if artifacts.ff_output != witness.ff_output {
+            return Err(witness_mismatch(
+                witness.step_number,
+                "feed-forward output does not match witness",
+            ));
+        }
+
+        let transition_witness: SharedTransformerTransitionWitness = artifacts.transition.into();
+        if transition_witness != witness.transition {
+            return Err(witness_mismatch(
+                witness.step_number,
+                "materialized transition does not match witness",
+            ));
+        }
+
+        if let Some((address, value)) = artifacts.transition.memory_write {
+            let address = checked_transition_u8("memory address", address)?;
+            memory.store(address, value, witness.step_number)?;
+        }
+
+        let next_pc = checked_transition_u8("pc", artifacts.transition.pc)?;
+        let next_sp = checked_transition_u8("sp", artifacts.transition.sp)?;
+        validate_stack_pointer(next_sp, memory.len())?;
+
+        let post_write_state = MachineState {
+            pc: next_pc,
+            acc: artifacts.transition.acc,
+            sp: next_sp,
+            zero_flag: artifacts.transition.zero_flag,
+            carry_flag: artifacts.transition.carry_flag,
+            halted: artifacts.transition.halted,
+            memory: memory.snapshot(),
+        };
+        if post_write_state != witness.post_write_state {
+            return Err(witness_mismatch(
+                witness.step_number,
+                "post-write state does not match witness",
+            ));
+        }
+
+        let output_token = encode_state(&post_write_state, self.config.d_model)?;
+        if output_token != witness.output_token {
+            return Err(witness_mismatch(
+                witness.step_number,
+                "output token does not match shared encode_state output",
+            ));
+        }
+
+        let final_state = decode_state(&output_token, post_write_state.memory.clone())?;
+        if final_state != witness.final_state {
+            return Err(witness_mismatch(
+                witness.step_number,
+                "decoded output state does not match witness",
+            ));
+        }
+
+        Ok(final_state)
     }
 }
 
@@ -1256,6 +1706,18 @@ mod tests {
         assert!(blend_bool(1.0));
         assert!(!blend_bool(0.49));
         assert!(!blend_bool(0.0));
+    }
+
+    #[test]
+    fn overflowed_raw_acc_scalar_detects_2_pow_63_edge() {
+        assert!(!overflowed_raw_acc_scalar(
+            (i128::from(i64::MAX) - 2048) as Scalar
+        ));
+        assert!(overflowed_raw_acc_scalar(i64::MAX as Scalar));
+        assert!(overflowed_raw_acc_scalar(
+            (i128::from(i64::MAX) + 1) as Scalar
+        ));
+        assert!(!overflowed_raw_acc_scalar(i64::MIN as Scalar));
     }
 
     #[test]
@@ -1479,6 +1941,42 @@ mod tests {
         let transition = GatedFeedForward.apply(&state, &compiled, AttentionContext::default());
 
         assert_eq!(transition.pc, 3); // pc + 1
+    }
+
+    #[test]
+    fn compile_js_takes_branch_when_acc_negative() {
+        let config = TransformerVmConfig::default();
+        let compiler = InstructionCompiler::new(&config).unwrap();
+        let compiled = compiler
+            .compile_instruction(Instruction::JumpIfSign(7))
+            .unwrap();
+
+        let state = MachineState {
+            pc: 2,
+            acc: -1,
+            ..MachineState::new(8)
+        };
+        let transition = GatedFeedForward.apply(&state, &compiled, AttentionContext::default());
+
+        assert_eq!(transition.pc, 7);
+    }
+
+    #[test]
+    fn compile_jns_falls_through_when_acc_negative() {
+        let config = TransformerVmConfig::default();
+        let compiler = InstructionCompiler::new(&config).unwrap();
+        let compiled = compiler
+            .compile_instruction(Instruction::JumpIfNotSign(7))
+            .unwrap();
+
+        let state = MachineState {
+            pc: 2,
+            acc: -1,
+            ..MachineState::new(8)
+        };
+        let transition = GatedFeedForward.apply(&state, &compiled, AttentionContext::default());
+
+        assert_eq!(transition.pc, 3);
     }
 
     #[test]

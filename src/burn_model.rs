@@ -541,8 +541,11 @@ mod tests {
         memory.store(1, -4, 2).expect("store");
 
         for mode in [
-            Attention2DMode::AverageHard,
-            Attention2DMode::HardSoftmax { temperature: 10.0 },
+            Attention2DMode::AverageHard { query: [1.0, 0.0] },
+            Attention2DMode::HardSoftmax {
+                temperature: 10.0,
+                query: [1.0, 0.0],
+            },
         ] {
             let attention = BurnAttention2D::new(18, mode.clone());
             let direct = attention

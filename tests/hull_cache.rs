@@ -187,7 +187,7 @@ fn softmax_query_blends_values_by_recency() {
     cache.insert([4.0, 10.0], &[10.0]);
 
     let value = cache
-        .query_value([1.0, 0.0], &Attention2DMode::Softmax)
+        .query_value([1.0, 0.0], &Attention2DMode::Softmax { query: [1.0, 0.0] })
         .unwrap();
 
     assert!(
@@ -206,13 +206,19 @@ fn hard_softmax_temperature_controls_sharpness() {
     let sharp = cache
         .query_value(
             [1.0, 0.0],
-            &Attention2DMode::HardSoftmax { temperature: 0.5 },
+            &Attention2DMode::HardSoftmax {
+                temperature: 0.5,
+                query: [1.0, 0.0],
+            },
         )
         .unwrap();
     let smooth = cache
         .query_value(
             [1.0, 0.0],
-            &Attention2DMode::HardSoftmax { temperature: 10.0 },
+            &Attention2DMode::HardSoftmax {
+                temperature: 10.0,
+                query: [1.0, 0.0],
+            },
         )
         .unwrap();
 

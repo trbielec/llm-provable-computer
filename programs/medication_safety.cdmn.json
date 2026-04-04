@@ -1,0 +1,46 @@
+{
+  "name": "Medication Safety Guardrails",
+  "type": "cDMN",
+  "variables": [
+    {"name": "max_dose", "memory": 0},
+    {"name": "required_class", "memory": 1},
+    {"name": "backup_class", "memory": 2},
+    {"name": "prohibited_class", "memory": 3}
+  ],
+  "collections": [
+    {
+      "name": "medications",
+      "count_memory": 4,
+      "base_memory": 5,
+      "stride": 2,
+      "max_items": 3,
+      "fields": [
+        {"name": "dose", "offset": 0},
+        {"name": "class_code", "offset": 1}
+      ]
+    }
+  ],
+  "constraints": [
+    {
+      "id": "M1",
+      "description": "Each medication dose must be within the policy maximum",
+      "logic": "forall medication in medications (medication.dose <= max_dose)",
+      "reason_code": 101,
+      "reason_label": "dose_exceeds_max"
+    },
+    {
+      "id": "M2",
+      "description": "At least one required or backup medication class must be present",
+      "logic": "exists medication in medications ((medication.class_code == required_class) or (medication.class_code == backup_class))",
+      "reason_code": 102,
+      "reason_label": "required_or_backup_class_missing"
+    },
+    {
+      "id": "M3",
+      "description": "No medication may use a prohibited class",
+      "logic": "forall medication in medications (not (medication.class_code == prohibited_class))",
+      "reason_code": 103,
+      "reason_label": "prohibited_class_present"
+    }
+  ]
+}

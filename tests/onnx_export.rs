@@ -69,7 +69,10 @@ fn shipped_cases() -> Vec<(&'static str, TransformerVmConfig, usize)> {
         (
             "programs/soft_attention_memory.tvm",
             TransformerVmConfig {
-                attention_mode: Attention2DMode::HardSoftmax { temperature: 10.0 },
+                attention_mode: Attention2DMode::HardSoftmax {
+                    temperature: 10.0,
+                    query: [1.0, 0.0],
+                },
                 ..TransformerVmConfig::default()
             },
             64,
@@ -77,7 +80,7 @@ fn shipped_cases() -> Vec<(&'static str, TransformerVmConfig, usize)> {
         (
             "programs/soft_attention_memory.tvm",
             TransformerVmConfig {
-                attention_mode: Attention2DMode::Softmax,
+                attention_mode: Attention2DMode::Softmax { query: [1.0, 0.0] },
                 ..TransformerVmConfig::default()
             },
             64,
@@ -237,7 +240,10 @@ fn onnx_runtime_matches_native_transformer_and_burn_for_shipped_programs() {
         (
             "programs/soft_attention_memory.tvm",
             TransformerVmConfig {
-                attention_mode: Attention2DMode::HardSoftmax { temperature: 10.0 },
+                attention_mode: Attention2DMode::HardSoftmax {
+                    temperature: 10.0,
+                    query: [1.0, 0.0],
+                },
                 ..TransformerVmConfig::default()
             },
             64usize,

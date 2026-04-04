@@ -2,17 +2,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, VmError};
 
-pub const MIN_D_MODEL: usize = 36;
+pub type Word = i64;
+
+pub const WORD_BITS: usize = 64;
+pub const MIN_D_MODEL: usize = 84; // 8 (pc) + WORD_BITS + 8 (sp) + 3 (flags) + 1 padding
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MachineState {
     pub pc: u8,
-    pub acc: i16,
+    pub acc: Word,
     pub sp: u8,
     pub zero_flag: bool,
     pub carry_flag: bool,
     pub halted: bool,
-    pub memory: Vec<i16>,
+    pub memory: Vec<Word>,
 }
 
 impl MachineState {
@@ -28,7 +31,7 @@ impl MachineState {
         }
     }
 
-    pub fn with_memory(memory: Vec<i16>) -> Self {
+    pub fn with_memory(memory: Vec<Word>) -> Self {
         let memory_size = memory.len();
         Self {
             memory,
@@ -50,24 +53,25 @@ pub fn encode_state(state: &MachineState, d_model: usize) -> Result<Vec<f32>> {
         *slot = encode_bit(((state.pc >> bit) & 1) == 1);
     }
 
-    let acc_bits = state.acc as u16;
-    for (bit, slot) in token.iter_mut().enumerate().skip(8).take(16) {
+    let acc_bits = state.acc as u64;
+    for (bit, slot) in token.iter_mut().enumerate().skip(8).take(WORD_BITS) {
         *slot = encode_bit(((acc_bits >> (bit - 8)) & 1) == 1);
     }
 
-    for (bit, slot) in token.iter_mut().enumerate().skip(24).take(8) {
-        *slot = encode_bit(((state.sp >> (bit - 24)) & 1) == 1);
+    for (bit, slot) in token.iter_mut().enumerate().skip(8 + WORD_BITS).take(8) {
+        *slot = encode_bit(((state.sp >> (bit - (8 + WORD_BITS))) & 1) == 1);
     }
 
-    token[32] = encode_bit(state.zero_flag);
-    token[33] = encode_bit(state.carry_flag);
-    token[34] = encode_bit(state.halted);
-    token[35] = 0.0;
+    let flags_start = 8 + WORD_BITS + 8;
+    token[flags_start] = encode_bit(state.zero_flag);
+    token[flags_start + 1] = encode_bit(state.carry_flag);
+    token[flags_start + 2] = encode_bit(state.halted);
+    token[flags_start + 3] = 0.0;
 
     Ok(token)
 }
 
-pub fn decode_state(token: &[f32], memory: Vec<i16>) -> Result<MachineState> {
+pub fn decode_state(token: &[f32], memory: Vec<Word>) -> Result<MachineState> {
     if token.len() < MIN_D_MODEL {
         return Err(VmError::InvalidConfig(format!(
             "token must have at least {MIN_D_MODEL} dimensions, got {}",
@@ -82,27 +86,29 @@ pub fn decode_state(token: &[f32], memory: Vec<i16>) -> Result<MachineState> {
         }
     }
 
-    let mut acc_bits = 0u16;
-    for (bit, value) in token.iter().enumerate().skip(8).take(16) {
+    let mut acc_bits = 0u64;
+    for (bit, value) in token.iter().enumerate().skip(8).take(WORD_BITS) {
         if decode_bit(*value) {
             acc_bits |= 1 << (bit - 8);
         }
     }
 
     let mut sp = 0u8;
-    for (bit, value) in token.iter().enumerate().skip(24).take(8) {
+    for (bit, value) in token.iter().enumerate().skip(8 + WORD_BITS).take(8) {
         if decode_bit(*value) {
-            sp |= 1 << (bit - 24);
+            sp |= 1 << (bit - (8 + WORD_BITS));
         }
     }
 
+    let flags_start = 8 + WORD_BITS + 8;
+
     Ok(MachineState {
         pc,
-        acc: acc_bits as i16,
+        acc: acc_bits as Word,
         sp,
-        zero_flag: decode_bit(token[32]),
-        carry_flag: decode_bit(token[33]),
-        halted: decode_bit(token[34]),
+        zero_flag: decode_bit(token[flags_start]),
+        carry_flag: decode_bit(token[flags_start + 1]),
+        halted: decode_bit(token[flags_start + 2]),
         memory,
     })
 }
@@ -151,7 +157,7 @@ mod tests {
     #[test]
     fn encode_decode_round_trips_zero_state() {
         let state = MachineState::new(4);
-        let token = encode_state(&state, 36).unwrap();
+        let token = encode_state(&state, MIN_D_MODEL).unwrap();
         let decoded = decode_state(&token, state.memory.clone()).unwrap();
         assert_eq!(decoded, state);
     }
@@ -160,14 +166,14 @@ mod tests {
     fn encode_decode_round_trips_max_values() {
         let state = MachineState {
             pc: 255,
-            acc: i16::MAX,
+            acc: Word::MAX,
             sp: 255,
             zero_flag: true,
             carry_flag: true,
             halted: true,
             memory: vec![0; 4],
         };
-        let token = encode_state(&state, 36).unwrap();
+        let token = encode_state(&state, MIN_D_MODEL).unwrap();
         let decoded = decode_state(&token, state.memory.clone()).unwrap();
         assert_eq!(decoded, state);
     }
@@ -183,7 +189,7 @@ mod tests {
             halted: false,
             memory: vec![0; 4],
         };
-        let token = encode_state(&state, 36).unwrap();
+        let token = encode_state(&state, MIN_D_MODEL).unwrap();
         let decoded = decode_state(&token, state.memory.clone()).unwrap();
         assert_eq!(decoded, state);
     }
@@ -192,14 +198,14 @@ mod tests {
     fn encode_decode_round_trips_min_acc() {
         let state = MachineState {
             pc: 42,
-            acc: i16::MIN,
+            acc: Word::MIN,
             sp: 8,
             zero_flag: false,
             carry_flag: true,
             halted: false,
             memory: vec![0; 8],
         };
-        let token = encode_state(&state, 36).unwrap();
+        let token = encode_state(&state, MIN_D_MODEL).unwrap();
         let decoded = decode_state(&token, state.memory.clone()).unwrap();
         assert_eq!(decoded, state);
     }
@@ -207,13 +213,13 @@ mod tests {
     #[test]
     fn encode_rejects_d_model_too_small() {
         let state = MachineState::new(4);
-        let err = encode_state(&state, 35).unwrap_err();
+        let err = encode_state(&state, MIN_D_MODEL - 1).unwrap_err();
         assert!(err.to_string().contains("d_model must be at least"));
     }
 
     #[test]
     fn decode_rejects_token_too_short() {
-        let token = vec![0.0; 35];
+        let token = vec![0.0; MIN_D_MODEL - 1];
         let err = decode_state(&token, vec![0; 4]).unwrap_err();
         assert!(err.to_string().contains("at least"));
     }
@@ -221,10 +227,11 @@ mod tests {
     #[test]
     fn encode_accepts_larger_d_model() {
         let state = MachineState::new(4);
-        let token = encode_state(&state, 64).unwrap();
-        assert_eq!(token.len(), 64);
+        let larger_d_model = MIN_D_MODEL + 32;
+        let token = encode_state(&state, larger_d_model).unwrap();
+        assert_eq!(token.len(), larger_d_model);
         // Extra dimensions should be zero
-        for &val in &token[36..] {
+        for &val in &token[MIN_D_MODEL..] {
             assert_eq!(val, 0.0);
         }
         let decoded = decode_state(&token, state.memory.clone()).unwrap();

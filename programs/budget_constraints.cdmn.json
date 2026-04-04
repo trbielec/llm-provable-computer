@@ -1,0 +1,23 @@
+{
+  "name": "Corporate Budget Compliance",
+  "type": "cDMN",
+  "variables": [
+    {"name": "marketing", "memory": 0},
+    {"name": "research", "memory": 1},
+    {"name": "total_budget", "memory": 2}
+  ],
+  "constraints": [
+    {
+      "id": "C1",
+      "description": "Total spend must not exceed budget",
+      "logic": "marketing + research <= total_budget",
+      "reason_label": "budget_cap_exceeded"
+    },
+    {
+      "id": "C2",
+      "description": "R&D must be exactly twice marketing",
+      "logic": "research == 2 * marketing",
+      "reason_label": "rd_ratio_mismatch"
+    }
+  ]
+}

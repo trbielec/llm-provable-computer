@@ -1,0 +1,17 @@
+{
+  "name": "Regulatory Ratio Compliance",
+  "type": "cDMN",
+  "variables": [
+    {"name": "reserve_capital", "memory": 0},
+    {"name": "total_assets", "memory": 1},
+    {"name": "min_ratio_pct", "memory": 2}
+  ],
+  "constraints": [
+    {
+      "id": "R1",
+      "description": "Reserve capital must be >= 10% of total assets",
+      "logic": "reserve_capital * 100 >= total_assets * min_ratio_pct",
+      "reason_label": "reserve_ratio_below_minimum"
+    }
+  ]
+}

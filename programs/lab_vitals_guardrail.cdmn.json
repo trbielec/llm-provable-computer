@@ -1,0 +1,36 @@
+{
+  "name": "Lab and Vitals Guardrails",
+  "type": "cDMN",
+  "variables": [
+    {"name": "wbc_count", "memory": 0},
+    {"name": "wbc_min", "memory": 1},
+    {"name": "wbc_max", "memory": 2},
+    {"name": "systolic_bp", "memory": 3},
+    {"name": "diastolic_bp", "memory": 4},
+    {"name": "pulse_pressure_min", "memory": 5},
+    {"name": "pulse_pressure_max", "memory": 6}
+  ],
+  "definitions": [
+    {
+      "name": "pulse_pressure",
+      "expression": "systolic_bp - diastolic_bp",
+      "description": "Derived systolic-diastolic pulse pressure"
+    }
+  ],
+  "constraints": [
+    {
+      "id": "L1",
+      "description": "White blood cell count must remain within range",
+      "logic": "wbc_count between wbc_min and wbc_max",
+      "reason_code": 301,
+      "reason_label": "wbc_out_of_range"
+    },
+    {
+      "id": "L2",
+      "description": "Pulse pressure must remain within range",
+      "logic": "pulse_pressure between pulse_pressure_min and pulse_pressure_max",
+      "reason_code": 302,
+      "reason_label": "pulse_pressure_out_of_range"
+    }
+  ]
+}

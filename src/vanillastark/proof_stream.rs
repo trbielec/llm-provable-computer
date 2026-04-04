@@ -6,6 +6,7 @@ use sha3::{
 };
 
 use super::field::FieldElement;
+use super::TranscriptHasher;
 
 /// Objects that can be pushed/pulled from the proof stream.
 #[derive(Clone, Debug)]
@@ -132,6 +133,8 @@ pub struct ProofStream {
     pub read_index: usize,
 }
 
+pub struct Shake256TranscriptHasher;
+
 impl Default for ProofStream {
     fn default() -> Self {
         Self::new()
@@ -145,6 +148,14 @@ fn shake256(data: &[u8], num_bytes: usize) -> Vec<u8> {
     let mut output = vec![0u8; num_bytes];
     reader.read(&mut output);
     output
+}
+
+impl TranscriptHasher for Shake256TranscriptHasher {
+    type Digest = Vec<u8>;
+
+    fn digest_bytes(bytes: &[u8]) -> Self::Digest {
+        shake256(bytes, 32)
+    }
 }
 
 fn serialize_objects(objects: &[ProofObject]) -> Vec<u8> {

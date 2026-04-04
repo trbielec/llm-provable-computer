@@ -3248,6 +3248,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c"
 
 [[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
 name = "hexf-parse"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3907,6 +3913,7 @@ dependencies = [
  "clap",
  "criterion",
  "crossterm",
+ "hex",
  "onnx-protobuf",
  "predicates",
  "proptest",
@@ -3918,6 +3925,7 @@ dependencies = [
  "sha3",
  "thiserror 2.0.18",
  "tract-onnx",
+ "tvm-verify-core",
 ]
 
 [[package]]
@@ -6868,6 +6876,28 @@ dependencies = [
  "sha1",
  "thiserror 2.0.18",
  "utf-8",
+]
+
+[[package]]
+name = "tvm-verify-core"
+version = "0.1.0"
+dependencies = [
+ "ark-ff",
+ "base64",
+ "blake2",
+ "serde",
+ "serde_json",
+ "sha3",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "tvm-verify-wasm"
+version = "0.1.0"
+dependencies = [
+ "js-sys",
+ "tvm-verify-core",
+ "wasm-bindgen",
 ]
 
 [[package]]

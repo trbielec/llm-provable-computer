@@ -1,0 +1,45 @@
+{
+  "name": "Insurance Claim Line Review",
+  "type": "cDMN",
+  "variables": [
+    { "name": "max_line_units", "memory": 0 },
+    { "name": "required_modifier", "memory": 1 },
+    { "name": "prohibited_modifier", "memory": 2 }
+  ],
+  "collections": [
+    {
+      "name": "claim_lines",
+      "count_memory": 3,
+      "base_memory": 4,
+      "stride": 2,
+      "max_items": 4,
+      "fields": [
+        { "name": "units", "offset": 0 },
+        { "name": "modifier_code", "offset": 1 }
+      ]
+    }
+  ],
+  "constraints": [
+    {
+      "id": "IC1",
+      "description": "Each claim line must stay within the permitted unit limit",
+      "logic": "forall line in claim_lines (line.units <= max_line_units)",
+      "reason_code": 551,
+      "reason_label": "line_units_exceed_limit"
+    },
+    {
+      "id": "IC2",
+      "description": "No claim line may use a prohibited modifier",
+      "logic": "forall line in claim_lines (not (line.modifier_code == prohibited_modifier))",
+      "reason_code": 552,
+      "reason_label": "prohibited_modifier_present"
+    },
+    {
+      "id": "IC3",
+      "description": "At least one qualifying modifier must appear on the claim",
+      "logic": "exists line in claim_lines (line.modifier_code == required_modifier)",
+      "reason_code": 553,
+      "reason_label": "required_modifier_missing"
+    }
+  ]
+}

@@ -1,5 +1,15 @@
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use std::time::Duration;
+
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use llm_provable_computer::vanillastark::{FieldElement, MPolynomial, RescuePrime, Stark};
+use llm_provable_computer::{
+    compile_cdmn_table_to_decision_program, compile_cdmn_table_with_metadata,
+    compile_dmn_table_with_metadata, estimate_compiled_cdmn_decision_stark_direct_cost,
+    estimate_execution_stark_cost, prove_cdmn_decision_stark_direct, prove_execution_stark,
+    verify_cdmn_decision_stark_direct, verify_execution_stark, CdmnDecisionStarkDirectCostEstimate,
+    CdmnTable, DmnTable, ProgramCompiler, TransformerVm, TransformerVmConfig,
+    VanillaStarkCostEstimate, VanillaStarkProofOptions,
+};
 
 /// Shared setup: build the Stark instance, trace, AIR, and boundary once.
 struct StarkFixture {
@@ -7,6 +17,20 @@ struct StarkFixture {
     trace: Vec<Vec<FieldElement>>,
     air: Vec<MPolynomial>,
     boundary: Vec<(usize, usize, FieldElement)>,
+}
+
+struct PolicyProofFixture {
+    label: &'static str,
+    model: TransformerVm,
+    max_steps: usize,
+    metrics: VanillaStarkCostEstimate,
+}
+
+struct DirectPolicyProofFixture {
+    label: &'static str,
+    table: CdmnTable,
+    initial_memory: Vec<i64>,
+    metrics: CdmnDecisionStarkDirectCostEstimate,
 }
 
 fn setup_fixture() -> StarkFixture {
@@ -39,6 +63,132 @@ fn setup_fixture() -> StarkFixture {
         air,
         boundary,
     }
+}
+
+fn build_policy_fixture(
+    label: &'static str,
+    assembly: &str,
+    memory_updates: &[(usize, i64)],
+    max_steps: usize,
+) -> PolicyProofFixture {
+    let config = TransformerVmConfig::default();
+    let compiled = ProgramCompiler::default()
+        .compile_source(assembly, config.clone())
+        .expect("compile policy program");
+    let mut initial_memory = compiled.program().initial_memory().to_vec();
+    for &(address, value) in memory_updates {
+        initial_memory[address] = value;
+    }
+    let program = compiled
+        .program()
+        .clone()
+        .with_initial_memory(initial_memory)
+        .expect("initial memory");
+    let model = TransformerVm::new(config, program).expect("transformer vm");
+    let metrics =
+        estimate_execution_stark_cost(&model, max_steps, VanillaStarkProofOptions::default())
+            .expect("estimate stark cost");
+    PolicyProofFixture {
+        label,
+        model,
+        max_steps,
+        metrics,
+    }
+}
+
+fn policy_benchmark_fixtures() -> Vec<PolicyProofFixture> {
+    let dmn_table: DmnTable =
+        serde_json::from_str(include_str!("../programs/loan_rules.dmn.json")).expect("dmn json");
+    let dmn_compiled = compile_dmn_table_with_metadata(&dmn_table).expect("compile dmn");
+
+    let medication_table: CdmnTable =
+        serde_json::from_str(include_str!("../programs/medication_safety.cdmn.json"))
+            .expect("medication cdmn json");
+    let medication_compiled =
+        compile_cdmn_table_with_metadata(&medication_table).expect("compile medication cdmn");
+
+    let lab_table: CdmnTable =
+        serde_json::from_str(include_str!("../programs/lab_vitals_guardrail.cdmn.json"))
+            .expect("lab cdmn json");
+    let lab_compiled = compile_cdmn_table_with_metadata(&lab_table).expect("compile lab cdmn");
+
+    vec![
+        build_policy_fixture(
+            "dmn_loan_first_hit",
+            &dmn_compiled.assembly,
+            &[(0, 750), (1, 25_000)],
+            256,
+        ),
+        build_policy_fixture(
+            "cdmn_medication_quantified",
+            &medication_compiled.assembly,
+            &[
+                (0, 500),
+                (1, 11),
+                (2, 12),
+                (3, 99),
+                (4, 2),
+                (5, 400),
+                (6, 7),
+                (7, 450),
+                (8, 12),
+            ],
+            1_000,
+        ),
+        build_policy_fixture(
+            "cdmn_lab_ranges",
+            &lab_compiled.assembly,
+            &[
+                (0, 8_000),
+                (1, 4_000),
+                (2, 11_000),
+                (3, 120),
+                (4, 80),
+                (5, 30),
+                (6, 60),
+            ],
+            1_000,
+        ),
+    ]
+}
+
+fn direct_policy_benchmark_fixtures() -> Vec<DirectPolicyProofFixture> {
+    let medication_table: CdmnTable =
+        serde_json::from_str(include_str!("../programs/medication_safety.cdmn.json"))
+            .expect("medication cdmn json");
+    let medication_program = compile_cdmn_table_to_decision_program(&medication_table)
+        .expect("compile medication decision");
+    let medication_metrics = estimate_compiled_cdmn_decision_stark_direct_cost(
+        &medication_program,
+        VanillaStarkProofOptions::default(),
+    )
+    .expect("estimate medication direct cost");
+
+    let lab_table: CdmnTable =
+        serde_json::from_str(include_str!("../programs/lab_vitals_guardrail.cdmn.json"))
+            .expect("lab cdmn json");
+    let lab_program =
+        compile_cdmn_table_to_decision_program(&lab_table).expect("compile lab decision");
+    let lab_metrics = estimate_compiled_cdmn_decision_stark_direct_cost(
+        &lab_program,
+        VanillaStarkProofOptions::default(),
+    )
+    .expect("estimate lab direct cost");
+
+    vec![
+        DirectPolicyProofFixture {
+            label: "direct_cdmn_medication_quantified",
+            table: medication_table,
+            initial_memory: vec![500, 11, 12, 99, 2, 400, 11, 450, 12, 0, 0],
+            metrics: medication_metrics,
+        },
+        DirectPolicyProofFixture {
+            label: "direct_cdmn_lab_ranges",
+            table: lab_table,
+            initial_memory: vec![8_000, 4_000, 11_000, 120, 80, 30, 60],
+            metrics: lab_metrics,
+        },
+    ]
 }
 
 fn bench_rescue_prime_hash(c: &mut Criterion) {
@@ -232,6 +382,112 @@ fn bench_scaling(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_policy_proofs(c: &mut Criterion) {
+    let fixtures = policy_benchmark_fixtures();
+    let mut group = c.benchmark_group("policy_proofs");
+    group.sample_size(3);
+    group.measurement_time(Duration::from_secs(20));
+
+    for fixture in &fixtures {
+        let id = format!(
+            "{}_rows{}_cols{}_fri{}",
+            fixture.label,
+            fixture.metrics.trace_rows,
+            fixture.metrics.trace_width,
+            fixture.metrics.fri_domain_length
+        );
+        group.bench_with_input(
+            BenchmarkId::new("prove", id.clone()),
+            fixture,
+            |b, fixture| {
+                b.iter(|| {
+                    prove_execution_stark(black_box(&fixture.model), fixture.max_steps)
+                        .expect("prove")
+                })
+            },
+        );
+
+        let proof = prove_execution_stark(&fixture.model, fixture.max_steps).expect("prove");
+        group.bench_with_input(
+            BenchmarkId::new("verify", id.clone()),
+            fixture,
+            |b, _fixture| {
+                b.iter(|| {
+                    assert!(verify_execution_stark(black_box(&proof)).expect("verify"));
+                })
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("proof_size", id),
+            fixture,
+            |b, _fixture| {
+                b.iter(|| {
+                    let proof = prove_execution_stark(black_box(&fixture.model), fixture.max_steps)
+                        .expect("prove");
+                    black_box(proof.proof.len())
+                })
+            },
+        );
+    }
+    group.finish();
+}
+
+fn bench_direct_policy_proofs(c: &mut Criterion) {
+    let fixtures = direct_policy_benchmark_fixtures();
+    let mut group = c.benchmark_group("direct_policy_proofs");
+    group.sample_size(3);
+    group.measurement_time(Duration::from_secs(20));
+
+    for fixture in &fixtures {
+        let id = format!(
+            "{}_rows{}_cols{}_fri{}",
+            fixture.label,
+            fixture.metrics.trace_rows,
+            fixture.metrics.register_count,
+            fixture.metrics.fri_domain_length
+        );
+        group.bench_with_input(
+            BenchmarkId::new("prove", id.clone()),
+            fixture,
+            |b, fixture| {
+                b.iter(|| {
+                    prove_cdmn_decision_stark_direct(
+                        black_box(&fixture.table),
+                        black_box(&fixture.initial_memory),
+                    )
+                    .expect("direct prove")
+                })
+            },
+        );
+
+        let proof = prove_cdmn_decision_stark_direct(&fixture.table, &fixture.initial_memory)
+            .expect("direct prove");
+        group.bench_with_input(
+            BenchmarkId::new("verify", id.clone()),
+            fixture,
+            |b, _fixture| {
+                b.iter(|| {
+                    assert!(verify_cdmn_decision_stark_direct(black_box(&proof))
+                        .expect("direct verify"));
+                })
+            },
+        );
+
+        group.bench_with_input(BenchmarkId::new("proof_size", id), fixture, |b, fixture| {
+            b.iter(|| {
+                let proof = prove_cdmn_decision_stark_direct(
+                    black_box(&fixture.table),
+                    black_box(&fixture.initial_memory),
+                )
+                .expect("direct prove");
+                black_box(proof.proof.len())
+            })
+        });
+    }
+    group.finish();
+}
+
 criterion_group! {
     name = field_benches;
     config = Criterion::default().sample_size(100);
@@ -268,6 +524,12 @@ criterion_group! {
     targets = bench_scaling
 }
 
+criterion_group! {
+    name = policy_benches;
+    config = Criterion::default().sample_size(3).measurement_time(Duration::from_secs(20));
+    targets = bench_policy_proofs, bench_direct_policy_proofs
+}
+
 criterion_main!(
     field_benches,
     polynomial_benches,
@@ -275,4 +537,5 @@ criterion_main!(
     fri_benches,
     stark_benches,
     scaling_benches,
+    policy_benches,
 );

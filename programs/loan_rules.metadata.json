@@ -1,0 +1,78 @@
+{
+  "assembly": "# Auto-compiled TVM assembly from DMN decision table\n.memory 21\n\n  LOADI 0\n  STORE 2\n  LOADI 0\n  STORE 3\n  LOADI 0\n  STORE 11\n  LOADI 0\n  STORE 12\n  LOADI 0\n  STORE 13\n  LOADI 0\n  STORE 14\n  LOADI 0\n  STORE 15\n  LOADI 0\n  STORE 16\n  LOADI 0\n  STORE 4\n  LOADI 0\n  STORE 5\n  LOADI 0\n  STORE 6\n  LOADI 0\n  STORE 7\n  LOADI 0\n  STORE 8\n  LOADI 0\n  STORE 9\n  LOADI 0\n  STORE 10\n  # Rule 1: Prime applicant approval\ndmn_rule_0:\n  LOAD 0\n  STORE 17\n  LOADI 750\n  STORE 18\n  LOAD 17\n  SUBM 18\n  JS dmn_rule_1\n  LOAD 1\n  STORE 19\n  LOADI 25000\n  STORE 20\n  LOAD 19\n  SUBM 20\n  JS dmn_rule_1\n  LOAD 7\n  SUB 0\n  JZ dmn_rule_0_match_slot_0\n  JMP dmn_rule_0_match_check_1\ndmn_rule_0_match_slot_0:\n  LOADI 1\n  STORE 8\n  LOADI 1\n  STORE 11\n  LOADI 1\n  STORE 12\n  JMP dmn_rule_0_match_done\ndmn_rule_0_match_check_1:\n  LOAD 7\n  SUB 1\n  JZ dmn_rule_0_match_slot_1\n  JMP dmn_rule_0_match_check_2\ndmn_rule_0_match_slot_1:\n  LOADI 1\n  STORE 9\n  LOADI 1\n  STORE 13\n  LOADI 1\n  STORE 14\n  JMP dmn_rule_0_match_done\ndmn_rule_0_match_check_2:\n  LOAD 7\n  SUB 2\n  JZ dmn_rule_0_match_slot_2\ndmn_rule_0_match_slot_2:\n  LOADI 1\n  STORE 10\n  LOADI 1\n  STORE 15\n  LOADI 1\n  STORE 16\n  JMP dmn_rule_0_match_done\ndmn_rule_0_match_done:\n  LOAD 7\n  ADD 1\n  STORE 7\n  LOADI 1\n  STORE 2\n  LOADI 1\n  STORE 3\n  LOADI 1\n  STORE 4\n  LOADI 1\n  STORE 5\n  LOADI 1\n  STORE 6\n  HALT\ndmn_rule_0_insufficient:\n  LOADI 0\n  STORE 2\n  LOADI 0\n  STORE 3\n  LOADI 0\n  STORE 4\n  LOADI -2\n  STORE 5\n  LOADI 1\n  STORE 6\n  HALT\n  # Rule 2: Standard applicant approval\ndmn_rule_1:\n  LOAD 0\n  STORE 17\n  LOADI 650\n  STORE 18\n  LOAD 17\n  SUBM 18\n  JS dmn_default_rule\n  LOAD 1\n  STORE 19\n  LOADI 30000\n  STORE 20\n  LOAD 19\n  SUBM 20\n  JS dmn_default_rule\n  LOAD 7\n  SUB 0\n  JZ dmn_rule_1_match_slot_0\n  JMP dmn_rule_1_match_check_1\ndmn_rule_1_match_slot_0:\n  LOADI 2\n  STORE 8\n  LOADI 1\n  STORE 11\n  LOADI 2\n  STORE 12\n  JMP dmn_rule_1_match_done\ndmn_rule_1_match_check_1:\n  LOAD 7\n  SUB 1\n  JZ dmn_rule_1_match_slot_1\n  JMP dmn_rule_1_match_check_2\ndmn_rule_1_match_slot_1:\n  LOADI 2\n  STORE 9\n  LOADI 1\n  STORE 13\n  LOADI 2\n  STORE 14\n  JMP dmn_rule_1_match_done\ndmn_rule_1_match_check_2:\n  LOAD 7\n  SUB 2\n  JZ dmn_rule_1_match_slot_2\ndmn_rule_1_match_slot_2:\n  LOADI 2\n  STORE 10\n  LOADI 1\n  STORE 15\n  LOADI 2\n  STORE 16\n  JMP dmn_rule_1_match_done\ndmn_rule_1_match_done:\n  LOAD 7\n  ADD 1\n  STORE 7\n  LOADI 1\n  STORE 2\n  LOADI 2\n  STORE 3\n  LOADI 1\n  STORE 4\n  LOADI 2\n  STORE 5\n  LOADI 2\n  STORE 6\n  HALT\ndmn_rule_1_insufficient:\n  LOADI 0\n  STORE 2\n  LOADI 0\n  STORE 3\n  LOADI 0\n  STORE 4\n  LOADI -2\n  STORE 5\n  LOADI 2\n  STORE 6\n  HALT\ndmn_default_rule:\n  LOAD 7\n  SUB 0\n  JZ dmn_default_rule_match_slot_0\n  JMP dmn_default_rule_match_check_1\ndmn_default_rule_match_slot_0:\n  LOADI 99\n  STORE 8\n  LOADI 0\n  STORE 11\n  LOADI 99\n  STORE 12\n  JMP dmn_default_rule_match_done\ndmn_default_rule_match_check_1:\n  LOAD 7\n  SUB 1\n  JZ dmn_default_rule_match_slot_1\n  JMP dmn_default_rule_match_check_2\ndmn_default_rule_match_slot_1:\n  LOADI 99\n  STORE 9\n  LOADI 0\n  STORE 13\n  LOADI 99\n  STORE 14\n  JMP dmn_default_rule_match_done\ndmn_default_rule_match_check_2:\n  LOAD 7\n  SUB 2\n  JZ dmn_default_rule_match_slot_2\ndmn_default_rule_match_slot_2:\n  LOADI 99\n  STORE 10\n  LOADI 0\n  STORE 15\n  LOADI 99\n  STORE 16\n  JMP dmn_default_rule_match_done\ndmn_default_rule_match_done:\n  LOAD 7\n  ADD 1\n  STORE 7\n  LOADI 0\n  STORE 2\n  LOADI 99\n  STORE 3\n  LOADI 1\n  STORE 4\n  LOADI 99\n  STORE 5\n  LOADI 99\n  STORE 6\n  HALT\n",
+  "output": {
+    "outputs": {
+      "rule_id": 3,
+      "status": 2
+    },
+    "decision_status_register": 4,
+    "reason_register": 5,
+    "trace": {
+      "selected_rule_id_register": 6,
+      "matched_rule_count_register": 7,
+      "matched_rule_trace_start": 8,
+      "max_matched_rules": 3
+    },
+    "matched_outputs": {
+      "rows_start": 11,
+      "row_stride": 2,
+      "max_rows": 3,
+      "output_offsets": {
+        "status": 0,
+        "rule_id": 1
+      }
+    }
+  },
+  "rules": [
+    {
+      "rule_id": 1,
+      "reason_code": 1,
+      "label": "prime_approval",
+      "description": "Prime applicant approval"
+    },
+    {
+      "rule_id": 2,
+      "reason_code": 2,
+      "label": "standard_approval",
+      "description": "Standard applicant approval"
+    },
+    {
+      "rule_id": 99,
+      "reason_code": 99,
+      "label": "default_reject",
+      "description": "Default reject"
+    }
+  ],
+  "reasons": [
+    {
+      "code": 1,
+      "label": "prime_approval",
+      "description": "Prime applicant approval"
+    },
+    {
+      "code": 2,
+      "label": "standard_approval",
+      "description": "Standard applicant approval"
+    },
+    {
+      "code": 99,
+      "label": "default_reject",
+      "description": "Default reject"
+    },
+    {
+      "code": -1,
+      "label": "no_matching_rule",
+      "description": "No DMN rule matched and no default rule applied"
+    },
+    {
+      "code": -2,
+      "label": "insufficient_data",
+      "description": "Insufficient data prevented DMN rule evaluation"
+    },
+    {
+      "code": -3,
+      "label": "hit_policy_violation",
+      "description": "Multiple matching DMN rules violated the configured hit policy"
+    }
+  ]
+}

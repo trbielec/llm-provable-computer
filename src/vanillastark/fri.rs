@@ -3,7 +3,7 @@
 use blake2::{Blake2b512, Digest};
 
 use super::field::FieldElement;
-use super::merkle::Merkle;
+use super::merkle::{Merkle, MerkleTree};
 use super::polynomial::{test_colinearity, Polynomial};
 use super::proof_stream::{ProofObject, ProofStream};
 
@@ -19,6 +19,11 @@ pub struct Fri {
     pub domain_length: usize,
     pub expansion_factor: usize,
     pub num_colinearity_tests: usize,
+}
+
+struct FriCommitment {
+    codewords: Vec<Vec<FieldElement>>,
+    trees: Vec<MerkleTree>,
 }
 
 impl Fri {
@@ -107,18 +112,18 @@ impl Fri {
             .collect()
     }
 
-    /// FRI commit phase: split-and-fold the codeword.
-    pub fn commit(
+    fn commit_phase(
         &self,
         codeword: &[FieldElement],
         proof_stream: &mut ProofStream,
-    ) -> Vec<Vec<FieldElement>> {
+    ) -> FriCommitment {
         let one = FieldElement::one();
         let two_inv = FieldElement::new(2).inverse();
         let mut omega = self.omega;
         let mut offset = self.offset;
         let mut codeword = codeword.to_vec();
         let mut codewords: Vec<Vec<FieldElement>> = Vec::new();
+        let mut trees = Vec::new();
         let num_rounds = self.num_rounds();
 
         for r in 0..num_rounds {
@@ -133,8 +138,9 @@ impl Fri {
 
             // Compute and send Merkle root
             let codeword_bytes: Vec<Vec<u8>> = codeword.iter().map(|e| e.to_bytes_str()).collect();
-            let root = Merkle::commit(&codeword_bytes);
-            proof_stream.push(ProofObject::Bytes(root));
+            let tree = MerkleTree::from_data(&codeword_bytes);
+            proof_stream.push(ProofObject::Bytes(tree.root().to_vec()));
+            trees.push(tree);
 
             if r == num_rounds - 1 {
                 break;
@@ -166,7 +172,16 @@ impl Fri {
 
         // Collect last codeword too
         codewords.push(codeword);
-        codewords
+        FriCommitment { codewords, trees }
+    }
+
+    /// FRI commit phase: split-and-fold the codeword.
+    pub fn commit(
+        &self,
+        codeword: &[FieldElement],
+        proof_stream: &mut ProofStream,
+    ) -> Vec<Vec<FieldElement>> {
+        self.commit_phase(codeword, proof_stream).codewords
     }
 
     /// FRI query phase: reveal leaves and authentication paths.
@@ -174,6 +189,8 @@ impl Fri {
         &self,
         current_codeword: &[FieldElement],
         next_codeword: &[FieldElement],
+        current_tree: &MerkleTree,
+        next_tree: &MerkleTree,
         c_indices: &[usize],
         proof_stream: &mut ProofStream,
     ) -> Vec<usize> {
@@ -191,20 +208,14 @@ impl Fri {
         }
 
         // Reveal authentication paths
-        let current_bytes: Vec<Vec<u8>> =
-            current_codeword.iter().map(|e| e.to_bytes_str()).collect();
-        let next_bytes: Vec<Vec<u8>> = next_codeword.iter().map(|e| e.to_bytes_str()).collect();
+        let current_paths_a = current_tree.open_many(&a_indices[..self.num_colinearity_tests]);
+        let current_paths_b = current_tree.open_many(&b_indices[..self.num_colinearity_tests]);
+        let next_paths = next_tree.open_many(&c_indices[..self.num_colinearity_tests]);
 
         for s in 0..self.num_colinearity_tests {
-            proof_stream.push(ProofObject::Path(Merkle::open(
-                a_indices[s],
-                &current_bytes,
-            )));
-            proof_stream.push(ProofObject::Path(Merkle::open(
-                b_indices[s],
-                &current_bytes,
-            )));
-            proof_stream.push(ProofObject::Path(Merkle::open(c_indices[s], &next_bytes)));
+            proof_stream.push(ProofObject::Path(current_paths_a[s].clone()));
+            proof_stream.push(ProofObject::Path(current_paths_b[s].clone()));
+            proof_stream.push(ProofObject::Path(next_paths[s].clone()));
         }
 
         [a_indices, b_indices].concat()
@@ -219,22 +230,29 @@ impl Fri {
         );
 
         // Commit phase
-        let codewords = self.commit(codeword, proof_stream);
+        let commitment = self.commit_phase(codeword, proof_stream);
 
         // Get indices
         let top_level_indices = self.sample_indices(
             &proof_stream.prover_fiat_shamir(),
-            codewords[0].len() / 2,
-            codewords.last().unwrap().len(),
+            commitment.codewords[0].len() / 2,
+            commitment.codewords.last().unwrap().len(),
             self.num_colinearity_tests,
         );
         let mut indices = top_level_indices.clone();
 
         // Query phase
-        for i in 0..codewords.len() - 1 {
-            let half = codewords[i].len() / 2;
+        for i in 0..commitment.codewords.len() - 1 {
+            let half = commitment.codewords[i].len() / 2;
             indices = indices.iter().map(|&idx| idx % half).collect();
-            self.query(&codewords[i], &codewords[i + 1], &indices, proof_stream);
+            self.query(
+                &commitment.codewords[i],
+                &commitment.codewords[i + 1],
+                &commitment.trees[i],
+                &commitment.trees[i + 1],
+                &indices,
+                proof_stream,
+            );
         }
 
         top_level_indices

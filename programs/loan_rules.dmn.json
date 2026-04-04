@@ -1,0 +1,43 @@
+{
+  "name": "Loan Approval Decision Table",
+  "hit_policy": "first",
+  "inputs": [
+    { "name": "credit_score", "memory": 0 },
+    { "name": "income", "memory": 1 }
+  ],
+  "outputs": [
+    { "name": "status", "memory": 2 },
+    { "name": "rule_id", "memory": 3 }
+  ],
+  "rules": [
+    {
+      "id": 1,
+      "description": "Prime applicant approval",
+      "when": "credit_score >= 750 and income >= 25000",
+      "assignments": [
+        { "output": "status", "value": 1 },
+        { "output": "rule_id", "value": 1 }
+      ],
+      "reason_label": "prime_approval"
+    },
+    {
+      "id": 2,
+      "description": "Standard applicant approval",
+      "when": "credit_score >= 650 and income >= 30000",
+      "assignments": [
+        { "output": "status", "value": 1 },
+        { "output": "rule_id", "value": 2 }
+      ],
+      "reason_label": "standard_approval"
+    }
+  ],
+  "default_rule": {
+    "id": 99,
+    "description": "Default reject",
+    "assignments": [
+      { "output": "status", "value": 0 },
+      { "output": "rule_id", "value": 99 }
+    ],
+    "reason_label": "default_reject"
+  }
+}

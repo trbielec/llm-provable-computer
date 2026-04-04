@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc e373792d09882a4a443988909427bc48b6f990480071ff9a898ecde361a261f0 # shrinks to specs = [(4, -58817, 0, 0), (8, 438679, 0, 0), (9, 0, 22, 0), (0, 0, 0, 0)], initial_memory = [0, 0, 0, 0, 0, 0, -358535, 0], layers = 1, max_steps = 3
+cc b5afe749e8d5fe982680f1f8554e52868e6713f805ad504f63d1d8b455e67d2e # shrinks to specs = [(12, -1, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0)], initial_memory = [0, 0, 0, 0, 0, 0, 0, 0], layers = 1, max_steps = 1, temperature = 0.1

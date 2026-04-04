@@ -1,22 +1,27 @@
 use crate::config::Attention2DMode;
 use crate::error::{Result, VmError};
 use crate::geometry::HullKvCache;
+use crate::state::Word;
 
 #[derive(Debug, Clone)]
 pub struct AddressedMemory {
-    cells: Vec<i16>,
+    cells: Vec<Word>,
     histories: Vec<HullKvCache>,
+    exact_histories: Vec<Vec<Word>>,
 }
 
 impl AddressedMemory {
-    pub fn from_initial(initial: &[i16]) -> Self {
+    pub fn from_initial(initial: &[Word]) -> Self {
         let mut histories = vec![HullKvCache::new(); initial.len()];
+        let mut exact_histories = vec![Vec::new(); initial.len()];
         for (addr, value) in initial.iter().enumerate() {
             histories[addr].insert([0.0, *value as f32], &[*value as f32]);
+            exact_histories[addr].push(*value);
         }
         Self {
             cells: initial.to_vec(),
             histories,
+            exact_histories,
         }
     }
 
@@ -28,11 +33,11 @@ impl AddressedMemory {
         self.cells.is_empty()
     }
 
-    pub fn load(&self, address: u8) -> Result<i16> {
-        self.load_with_mode(address, &Attention2DMode::AverageHard)
+    pub fn load(&self, address: u8) -> Result<Word> {
+        self.load_with_mode(address, &Attention2DMode::AverageHard { query: [1.0, 0.0] })
     }
 
-    pub fn load_with_mode(&self, address: u8, mode: &Attention2DMode) -> Result<i16> {
+    pub fn load_with_mode(&self, address: u8, mode: &Attention2DMode) -> Result<Word> {
         let idx = self.checked_index(address)?;
         let history = &self.histories[idx];
 
@@ -40,24 +45,42 @@ impl AddressedMemory {
             return Ok(self.cells[idx]);
         }
 
-        let value = history.query_value([1.0, 0.0], mode)?;
-        Ok(value
-            .first()
-            .copied()
-            .unwrap_or(self.cells[idx] as f32)
-            .round() as i16)
+        match mode {
+            Attention2DMode::AverageHard { .. } => {
+                let (point, value) = history.query_argmax(mode.query())?;
+                Ok(self.exact_histories[idx]
+                    .get(point.id)
+                    .copied()
+                    .unwrap_or_else(|| {
+                        value
+                            .first()
+                            .copied()
+                            .unwrap_or(self.cells[idx] as f32)
+                            .round() as Word
+                    }))
+            }
+            Attention2DMode::HardSoftmax { .. } | Attention2DMode::Softmax { .. } => {
+                let value = history.query_value(mode.query(), mode)?;
+                Ok(value
+                    .first()
+                    .copied()
+                    .unwrap_or(self.cells[idx] as f32)
+                    .round() as Word)
+            }
+        }
     }
 
-    pub fn store(&mut self, address: u8, value: i16, step: usize) -> Result<()> {
+    pub fn store(&mut self, address: u8, value: Word, step: usize) -> Result<()> {
         let idx = self.checked_index(address)?;
         let history = &mut self.histories[idx];
 
         self.cells[idx] = value;
         history.insert([step as f32, value as f32], &[value as f32]);
+        self.exact_histories[idx].push(value);
         Ok(())
     }
 
-    pub fn snapshot(&self) -> Vec<i16> {
+    pub fn snapshot(&self) -> Vec<Word> {
         self.cells.clone()
     }
 
@@ -157,7 +180,9 @@ mod tests {
         let mut mem = AddressedMemory::from_initial(&[0]);
         mem.store(0, 10, 2).unwrap();
         // Softmax blends across all history entries
-        let value = mem.load_with_mode(0, &Attention2DMode::Softmax).unwrap();
+        let value = mem
+            .load_with_mode(0, &Attention2DMode::Softmax { query: [1.0, 0.0] })
+            .unwrap();
         // Should be between 0 and 10 (blended)
         assert!((0..=10).contains(&value), "softmax value={value}");
     }
