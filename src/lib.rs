@@ -71,10 +71,10 @@ pub use cdmn::{
     DecisionValueRef, DecisionValueSource, Definition, ReasonMetadata, Variable,
 };
 pub use commit_and_audit::{
-    audit_execution, build_auditable_numeric_rows, commit_execution, verify_audit,
-    verify_audit_with_config, ApproximateAuditVerificationReport, AuditRequest, AuditResponse,
-    AuditTarget, AuditableNumericTraceRow, ExecutionReceipt, OpenedStep, OpenedWeight,
-    WeightCommitment,
+    audit_execution, build_auditable_numeric_rows, commit_execution, receipt_initial_state_hash,
+    receipt_program_hash, verify_audit, verify_audit_with_config, verify_receipt_bindings,
+    ApproximateAuditVerificationReport, AuditRequest, AuditResponse, AuditTarget,
+    AuditableNumericTraceRow, ExecutionReceipt, OpenedStep, OpenedWeight, WeightCommitment,
 };
 pub use compiler::ProgramCompiler;
 pub use config::{Attention2DMode, TransformerVmConfig};

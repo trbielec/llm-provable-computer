@@ -603,6 +603,12 @@ fn audit_command(
     let model = compile_model(program_path, layers, attention_mode)?;
     let mut runtime = ExecutionRuntime::new(model.clone(), receipt.step_count);
     let (_result, witness) = runtime.run_with_witness()?;
+    if !llm_provable_computer::verify_receipt_bindings(&receipt, &model, &witness.initial_state)? {
+        return Err(VmError::InvalidConfig(format!(
+            "receipt {} does not match the compiled program/config or initial state",
+            receipt_path.display()
+        )));
+    }
 
     let staged_trace = llm_provable_computer::build_shared_transformer_staged_trace(
         &witness,
