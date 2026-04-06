@@ -18,6 +18,7 @@ mod dmn_backend_tvm;
 mod dmn_decision;
 mod dmn_direct;
 mod dmn_ir;
+pub mod effect_root;
 pub mod engine;
 pub mod error;
 pub mod freivalds;

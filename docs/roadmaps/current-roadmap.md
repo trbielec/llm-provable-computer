@@ -7,7 +7,7 @@ Hybrid proposal lane over the provable TVM microkernel
 ## Status
 
 - Date: April 6, 2026
-- Phase: Phase 2 in progress (external state and effect roots)
+- Phase: Phase 3 in progress (candidate-parallel evaluation)
 - Primary issue: `#29`
 - Supporting context: issue `#15` and the supplemental source-map comment on `#29`
 
@@ -17,7 +17,7 @@ Hybrid proposal lane over the provable TVM microkernel
 |-------|--------|-------|
 | Phase 0: freeze and isolate | **complete** | Branch `issue-29-investigation` pushed; baselines in `docs/baselines/`; `proof-boundary.md` reconciled; `JS`/`JNS` added to supported lists; roadmap benchmark command corrected |
 | Phase 1: `ProposalReceipt` | **complete** | `src/proposal_receipt.rs`; 10 integration tests in `tests/proposal_receipt.rs`; all suites green |
-| Phase 2: external state and effect roots | not started | — |
+| Phase 2: external state and effect roots | **complete** | `src/effect_root.rs`; 15 integration tests in `tests/effect_root.rs`; all suites green |
 | Phase 3: candidate-parallel evaluation | not started | — |
 | Phase 4: planner integration | not started | — |
 | Phase 5: serving-side overlap experiments | not started | — |
@@ -227,7 +227,7 @@ Exit criteria:
 - proposal receipt can be created, serialized, hashed, and validated,
 - no existing execution path changes behavior.
 
-## Phase 2: external state and effect roots
+## Phase 2: external state and effect roots — COMPLETE
 
 Objective:
 
