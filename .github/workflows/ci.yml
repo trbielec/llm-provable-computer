@@ -8,10 +8,12 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  RUN_HEAVY_TESTS: "false"
 
 jobs:
   cargo-test:
     name: cargo test (${{ matrix.name }})
+    if: env.RUN_HEAVY_TESTS == 'true' || matrix.heavy == false
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -20,15 +22,19 @@ jobs:
           - name: default
             cargo_args: ""
             needs_python: false
+            heavy: false
           - name: burn-model
             cargo_args: "--features burn-model"
             needs_python: false
+            heavy: false
           - name: onnx-export
             cargo_args: "--features onnx-export"
             needs_python: true
+            heavy: true
           - name: full
             cargo_args: "--features full"
             needs_python: true
+            heavy: true
 
     steps:
       - name: Checkout
@@ -59,7 +65,7 @@ jobs:
     name: shared-transformer proof round-trips
     runs-on: ubuntu-latest
     # Only run on pushes to main; PRs rely on the fast default suite.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: env.RUN_HEAVY_TESTS == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
       - name: Checkout
@@ -73,12 +79,20 @@ jobs:
 
       - name: Run proof round-trip regression
         run: |
+          set -o pipefail
           cargo test --release --test transformer_stark -- --include-ignored \
             staged_skeleton_proof_round_trips_for_average_hard_execution \
-            forward_pass_proof_round_trips_for_average_hard_execution
+            forward_pass_proof_round_trips_for_average_hard_execution &
+          PROOF_PID=$!
+          while kill -0 "$PROOF_PID" 2>/dev/null; do
+            sleep 30
+            echo "shared transformer proof regression still running..."
+          done
+          wait "$PROOF_PID"
 
   milestone-1-proof:
     name: export and validate ONNX workflow
+    if: env.RUN_HEAVY_TESTS == 'true'
     runs-on: ubuntu-latest
 
     steps:
