@@ -177,10 +177,11 @@ enum Command {
         )]
         attention_mode: Attention2DMode,
     },
-    /// Run a program across N independent initial states in parallel (CPU batch).
+    /// Run one or more programs across N independent initial states in parallel (CPU batch).
     BatchRun {
-        /// Path to the source `.tvm` program.
-        program: PathBuf,
+        /// Paths to the source `.tvm` programs.
+        #[arg(required = true)]
+        programs: Vec<PathBuf>,
         /// Number of independent runs.
         #[arg(long, default_value_t = 64)]
         count: usize,
@@ -371,7 +372,7 @@ fn run() -> llm_provable_computer::Result<()> {
         Command::AggregateProofs { proofs, output } => aggregate_proofs_command(&proofs, &output)?,
         Command::VerifyAggregate { proof } => verify_aggregate_command(&proof)?,
         Command::BatchRun {
-            program,
+            programs,
             count,
             max_steps,
             layers,
@@ -379,7 +380,7 @@ fn run() -> llm_provable_computer::Result<()> {
             metal,
             verify_native,
         } => batch_run_command(
-            &program,
+            &programs,
             count,
             max_steps,
             layers,
@@ -765,7 +766,7 @@ fn save_receipt(
 }
 
 fn batch_run_command(
-    program: &Path,
+    program_paths: &[PathBuf],
     count: usize,
     max_steps: usize,
     layers: usize,
@@ -776,19 +777,48 @@ fn batch_run_command(
     use llm_provable_computer::batch::{BatchRunResult, BatchRunner};
     use std::sync::Arc;
 
-    let model = Arc::new(compile_model(program, layers, attention_mode)?);
+    let config = TransformerVmConfig {
+        num_layers: layers,
+        attention_mode,
+        ..TransformerVmConfig::default()
+    };
+
+    let mut sources = Vec::new();
+    for p in program_paths {
+        let s = fs::read_to_string(p).map_err(|io_error| {
+            VmError::InvalidConfig(format!(
+                "failed to read program {}: {io_error}",
+                p.display()
+            ))
+        })?;
+        sources.push(s);
+    }
+    let sources_str: Vec<&str> = sources.iter().map(|s| s.as_str()).collect();
+
+    let (model_inner, entry_points) = ProgramCompiler.compile_sources(&sources_str, config)?;
+    let model = Arc::new(model_inner);
     let initial_memory = model.program().initial_memory().to_vec();
 
-    // Generate `count` initial states with acc = 0, 1, …, count-1.
+    // Generate `count` initial states distributed across the programs.
+    let num_progs = program_paths.len();
     let initial_states: Vec<MachineState> = (0..count)
         .map(|i| {
+            let prog_idx = i % num_progs;
             let mut s = MachineState::with_memory(initial_memory.clone());
-            s.acc = i as i64;
+            s.pc = entry_points[prog_idx];
+            s.acc = (i / num_progs) as i64;
             s
         })
         .collect();
 
-    println!("program: {}", program.display());
+    if program_paths.len() == 1 {
+        println!("program: {}", program_paths[0].display());
+    } else {
+        println!("programs: {} total", program_paths.len());
+        for (i, p) in program_paths.iter().enumerate() {
+            println!("  [{i}] {} (entry pc={})", p.display(), entry_points[i]);
+        }
+    }
     println!("backend: {}", if metal { "metal" } else { "cpu-rayon" });
     println!("batch_size: {count}");
     println!("max_steps: {max_steps}");

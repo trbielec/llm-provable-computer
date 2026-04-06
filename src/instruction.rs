@@ -70,6 +70,25 @@ impl Instruction {
             Instruction::Halt => "HALT",
         }
     }
+
+    pub fn with_offset(&self, offset: u8) -> Result<Self> {
+        let add_offset = |target: u8| {
+            target.checked_add(offset).ok_or_else(|| VmError::InvalidConfig(format!(
+                "jump target {} with offset {} exceeds u8 limit",
+                target, offset
+            )))
+        };
+
+        match *self {
+            Instruction::Call(target) => Ok(Instruction::Call(add_offset(target)?)),
+            Instruction::Jump(target) => Ok(Instruction::Jump(add_offset(target)?)),
+            Instruction::JumpIfZero(target) => Ok(Instruction::JumpIfZero(add_offset(target)?)),
+            Instruction::JumpIfNotZero(target) => Ok(Instruction::JumpIfNotZero(add_offset(target)?)),
+            Instruction::JumpIfSign(target) => Ok(Instruction::JumpIfSign(add_offset(target)?)),
+            Instruction::JumpIfNotSign(target) => Ok(Instruction::JumpIfNotSign(add_offset(target)?)),
+            other => Ok(other),
+        }
+    }
 }
 
 impl fmt::Display for Instruction {
@@ -140,6 +159,66 @@ impl Program {
         }
         self.initial_memory = initial_memory;
         Ok(self)
+    }
+
+    /// Merges multiple programs into a single shared instruction space.
+    /// Returns the combined program and a list of entry points (PCs) for each
+    /// original program.
+    ///
+    /// # Safety and Memory
+    /// All programs share the same addressable memory space. Callers must ensure
+    /// that merged programs use non-conflicting memory regions or intentionally
+    /// share state.
+    pub fn merge(programs: &[Self]) -> Result<(Self, Vec<u8>)> {
+        if programs.is_empty() {
+            return Err(VmError::InvalidConfig(
+                "cannot merge zero programs".to_string(),
+            ));
+        }
+
+        let mut merged_instructions = Vec::new();
+        let mut entry_points = Vec::new();
+        let mut max_memory_size = 0;
+
+        for p in programs {
+            let offset = merged_instructions.len();
+            if offset > usize::from(u8::MAX) {
+                return Err(VmError::InvalidConfig(format!(
+                    "merged program offset {} exceeds u8 limit",
+                    offset
+                )));
+            }
+            entry_points.push(offset as u8);
+
+            for instr in p.instructions() {
+                merged_instructions.push(instr.with_offset(offset as u8)?);
+            }
+            max_memory_size = max_memory_size.max(p.memory_size());
+        }
+
+        if merged_instructions.len() > usize::from(u8::MAX) + 1 {
+            return Err(VmError::InvalidConfig(format!(
+                "merged program has {} instructions, exceeding u8 limit",
+                merged_instructions.len()
+            )));
+        }
+
+        // Overlay initial memory: later programs in the list override earlier ones.
+        // We only override with non-zero values to prevent default zero-initialized
+        // memory from wiping out meaningful values from earlier programs.
+        let mut merged_initial_memory = vec![0; max_memory_size];
+        for p in programs {
+            for (i, &val) in p.initial_memory().iter().enumerate() {
+                if val != 0 {
+                    merged_initial_memory[i] = val;
+                }
+            }
+        }
+
+        let merged_program = Program::new(merged_instructions, max_memory_size)
+            .with_initial_memory(merged_initial_memory)?;
+
+        Ok((merged_program, entry_points))
     }
 
     pub fn instruction_at(&self, pc: u8) -> Result<Instruction> {
@@ -306,5 +385,31 @@ mod tests {
         assert_eq!(format!("{}", Instruction::JumpIfSign(6)), "JS 6");
         assert_eq!(format!("{}", Instruction::JumpIfNotSign(2)), "JNS 2");
         assert_eq!(format!("{}", Instruction::Call(8)), "CALL 8");
+    }
+
+    #[test]
+    fn test_program_merge_memory_overlay() {
+        let prog_a = Program::new(vec![Instruction::Halt], 3)
+            .with_initial_memory(vec![5, 0, 3])
+            .unwrap();
+        let prog_b = Program::new(vec![Instruction::Halt], 2)
+            .with_initial_memory(vec![0, 7])
+            .unwrap();
+
+        let (merged, _) = Program::merge(&[prog_a, prog_b]).unwrap();
+        // Result should have 5 at addr 0 (from A), 7 at addr 1 (from B), 3 at addr 2 (from A)
+        // B's 0 at addr 0 should NOT overwrite A's 5.
+        assert_eq!(merged.initial_memory(), &[5, 7, 3]);
+    }
+
+    #[test]
+    fn test_program_merge_offset_overflow_rejected() {
+        // Prog C has Jump(10). If offset is 250, target becomes 260 which overflows u8.
+        let prog_c = Program::new(vec![Instruction::Jump(10)], 1);
+        let instrs_large = vec![Instruction::Nop; 250];
+        let prog_large = Program::new(instrs_large, 1);
+
+        let err = Program::merge(&[prog_large, prog_c]).unwrap_err();
+        assert!(err.to_string().contains("exceeds u8 limit"));
     }
 }
