@@ -505,9 +505,9 @@ fn eval_availability(
             }
             Ok(STATUS_AVAILABLE)
         }
-        DecisionAvailability::Status(source) => match source {
-            _ => resolve_availability_source(source, initial_memory, definition_statuses, bindings),
-        },
+        DecisionAvailability::Status(source) => {
+            resolve_availability_source(source, initial_memory, definition_statuses, bindings)
+        }
     }
 }
 

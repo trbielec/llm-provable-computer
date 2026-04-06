@@ -318,10 +318,7 @@ pub(crate) struct FeedForwardEvaluation {
 }
 
 impl FeedForwardWeights {
-    #[cfg_attr(
-        not(any(test, feature = "burn-model", feature = "onnx-export")),
-        allow(dead_code)
-    )]
+    #[allow(dead_code)]
     pub(crate) fn evaluate(&self, input: &[Scalar]) -> Vec<Scalar> {
         self.evaluate_with_hidden(input).output
     }

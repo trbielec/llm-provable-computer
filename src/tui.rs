@@ -365,7 +365,7 @@ impl ViewerState {
             mode: ViewMode::Runway,
             theme_idx: 0,
             tick_ms: tick_rate.as_millis().max(1) as u64,
-            acc_history: vec![runtime.state().acc as i64],
+            acc_history: vec![runtime.state().acc],
             pc_history: vec![runtime.state().pc as u64],
             throughput_history: vec![0],
             last_seen_step: runtime.step_count(),
@@ -418,7 +418,7 @@ impl ViewerState {
 
     fn refresh(&mut self, runtime: &ExecutionRuntime, now: Instant) {
         if runtime.step_count() != self.last_seen_step {
-            push_limited(&mut self.acc_history, runtime.state().acc as i64);
+            push_limited(&mut self.acc_history, runtime.state().acc);
             push_limited(&mut self.pc_history, runtime.state().pc as u64);
             self.last_seen_step = runtime.step_count();
         }

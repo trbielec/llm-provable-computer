@@ -349,8 +349,10 @@ impl Stark {
                     let fri_domain = &fri_domain;
                     handles.push(scope.spawn(move || {
                         let mut chunk = Vec::with_capacity(end - start);
-                        for index in start..end {
-                            let codeword = boundary_quotients[index].evaluate_domain(fri_domain);
+                        for (index, bq) in
+                            boundary_quotients.iter().enumerate().take(end).skip(start)
+                        {
+                            let codeword = bq.evaluate_domain(fri_domain);
                             let codeword_bytes: Vec<Vec<u8>> =
                                 codeword.iter().map(|e| e.to_bytes_str()).collect();
                             let merkle_tree = MerkleTree::from_data(&codeword_bytes);

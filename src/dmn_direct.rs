@@ -617,7 +617,7 @@ fn build_terminal_predicates(
     }
 
     let no_match_predicate =
-        and_all(prior_not_matches.into_iter()).unwrap_or(DecisionBooleanExpr::Constant(true));
+        and_all(prior_not_matches).unwrap_or(DecisionBooleanExpr::Constant(true));
     if let Some(default_rule) = &decision_program.default_rule {
         predicates.push((format!("default_{}", default_rule.id), no_match_predicate));
     } else {

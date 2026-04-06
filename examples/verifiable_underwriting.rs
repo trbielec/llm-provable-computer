@@ -60,7 +60,7 @@ fn main() -> llm_provable_computer::Result<()> {
     "#;
 
     let config = TransformerVmConfig::default();
-    let compiled = ProgramCompiler::default().compile_source(assembly, config.clone())?;
+    let compiled = ProgramCompiler.compile_source(assembly, config.clone())?;
     let vm = TransformerVm::new(config, compiled.program().clone())?;
 
     println!("Step 1: Executing Underwriting Model...");

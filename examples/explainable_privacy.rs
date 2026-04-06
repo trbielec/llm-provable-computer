@@ -2,11 +2,7 @@ use blake2::{Blake2b512, Digest};
 use llm_provable_computer::compiler::ProgramCompiler;
 use llm_provable_computer::config::TransformerVmConfig;
 use llm_provable_computer::model::TransformerVm;
-use llm_provable_computer::proof::{
-    prove_execution_stark, verify_execution_stark, VanillaStarkExecutionClaim,
-};
-use llm_provable_computer::runtime::ExecutionRuntime;
-use llm_provable_computer::vanillastark::FieldElement;
+use llm_provable_computer::proof::{prove_execution_stark, verify_execution_stark};
 use std::time::Instant;
 
 /// BUSINESS USE CASE: Private & Explainable Underwriting
@@ -61,13 +57,13 @@ fn main() -> llm_provable_computer::Result<()> {
     );
 
     let config = TransformerVmConfig::default();
-    let compiled = ProgramCompiler::default().compile_source(&assembly, config.clone())?;
+    let compiled = ProgramCompiler.compile_source(&assembly, config.clone())?;
     let vm = TransformerVm::new(config, compiled.program().clone())?;
 
     // 3. Generate Proof (The "Prover" knows the secret income)
     println!("Step 1: Generating ZK-STARK Proof...");
     let start = Instant::now();
-    let mut proof = prove_execution_stark(&vm, 512)?;
+    let proof = prove_execution_stark(&vm, 512)?;
     let proving_time = start.elapsed();
 
     // 4. Transform into a Private Claim
@@ -75,7 +71,7 @@ fn main() -> llm_provable_computer::Result<()> {
     // in the public claim and replace it with the commitment.
     // NOTE: In a full production implementation, the AIR would include a constraint
     // verifying that Hash(Memory[0]) == commitment.
-    let mut private_claim = proof.claim.clone();
+    let _private_claim = proof.claim.clone();
     // In our current ISA, the initial state is derived from the program.
     // We demonstrate the concept by showing that the verifier only needs the final state
     // and the commitment to be convinced.

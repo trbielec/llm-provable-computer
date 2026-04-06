@@ -554,8 +554,8 @@ impl VmAir {
 
         // Bit integrity constraint for signed two's-complement ACC.
         let mut bit_sum = MPolynomial::zero();
-        for i in 0..(WORD_BITS - 1) {
-            bit_sum = bit_sum + current_acc_bits[i].clone() * mp_constant(1 << i);
+        for (i, bit) in current_acc_bits.iter().enumerate().take(WORD_BITS - 1) {
+            bit_sum = bit_sum + bit.clone() * mp_constant(1 << i);
         }
         bit_sum = bit_sum
             - current_acc_bits[WORD_BITS - 1].clone() * mp_constant(1i128 << (WORD_BITS - 1));

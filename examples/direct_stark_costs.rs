@@ -49,7 +49,7 @@ fn main() {
         let compiled =
             llm_provable_computer::compile_cdmn_table_with_metadata(&table).expect("compile tvm");
         let config = TransformerVmConfig::default();
-        let compiled_program = ProgramCompiler::default()
+        let compiled_program = ProgramCompiler
             .compile_source(&compiled.assembly, config.clone())
             .expect("compile source");
         let mut initial_memory = compiled_program.program().initial_memory().to_vec();
