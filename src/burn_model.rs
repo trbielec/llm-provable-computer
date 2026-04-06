@@ -397,7 +397,10 @@ fn encode_state_tensor<B: Backend>(
     ))
 }
 
-fn decode_state_tensor<B: Backend>(tensor: Tensor<B, 1>, memory: Vec<Word>) -> Result<MachineState> {
+fn decode_state_tensor<B: Backend>(
+    tensor: Tensor<B, 1>,
+    memory: Vec<Word>,
+) -> Result<MachineState> {
     let values = tensor.into_data().convert::<f32>();
     let slice = values
         .as_slice::<f32>()

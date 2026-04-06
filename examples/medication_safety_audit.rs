@@ -17,7 +17,7 @@ fn main() {
     );
 
     let config = TransformerVmConfig::default();
-    let model = ProgramCompiler::default()
+    let model = ProgramCompiler
         .compile_source(&compiled.assembly, config.clone())
         .expect("Failed to compile program");
 

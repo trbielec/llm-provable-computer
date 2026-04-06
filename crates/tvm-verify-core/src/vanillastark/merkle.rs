@@ -107,7 +107,7 @@ impl Merkle {
 
         for sibling in path {
             let mut combined = Vec::with_capacity(current_hash.len() + sibling.len());
-            if current_index % 2 == 0 {
+            if current_index.is_multiple_of(2) {
                 combined.extend_from_slice(&current_hash);
                 combined.extend_from_slice(sibling);
             } else {

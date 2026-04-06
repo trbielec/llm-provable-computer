@@ -21,7 +21,7 @@ fn main() {
     println!("Stochastic LLM Proposal: Marketing=3000, Research=6000, Total=9000");
 
     let config = TransformerVmConfig::default();
-    let compiler = ProgramCompiler::default();
+    let compiler = ProgramCompiler;
     let model = compiler
         .compile_source(&source, config.clone())
         .expect("Failed to compile program");

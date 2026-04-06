@@ -271,6 +271,7 @@ impl LogicCompiler {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn compile_comparison(
         &mut self,
         lhs: &ArithmeticIr,
@@ -345,6 +346,7 @@ impl LogicCompiler {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn compile_between(
         &mut self,
         value: &ArithmeticIr,
@@ -541,6 +543,7 @@ impl LogicCompiler {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn compile_quantified(
         &mut self,
         kind: QuantifierKind,

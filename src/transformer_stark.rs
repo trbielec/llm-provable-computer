@@ -1455,7 +1455,12 @@ impl SharedTransformerStagedSkeletonAir {
             for (pc_idx, pc_selector) in pc_selectors.iter().enumerate() {
                 let weights = &self.compiled_instructions[pc_idx].ff_weights;
                 let mut chunk_sum = MPolynomial::zero();
-                for feature_index in feature_start..feature_end {
+                for (feature_index, input_feature) in input_features
+                    .iter()
+                    .enumerate()
+                    .take(feature_end)
+                    .skip(feature_start)
+                {
                     let coefficient = if is_gate {
                         weights.gate.get(hidden_index, feature_index)
                     } else {
@@ -1464,8 +1469,7 @@ impl SharedTransformerStagedSkeletonAir {
                     if coefficient == 0 {
                         continue;
                     }
-                    chunk_sum = chunk_sum
-                        + input_features[feature_index].clone() * mp_constant(coefficient);
+                    chunk_sum = chunk_sum + input_feature.clone() * mp_constant(coefficient);
                 }
                 linear = linear + pc_selector.clone() * chunk_sum;
             }
@@ -2430,8 +2434,13 @@ fn fill_linear_feature_accumulator_columns(
                 let previous_feature_end = ((previous_feature_chunk + 1)
                     * SKELETON_LINEAR_FEATURE_CHUNK_SIZE)
                     .min(INPUT_DIM);
-                for feature_index in previous_feature_start..previous_feature_end {
-                    let feature_value = i128::from(input_features[feature_index]);
+                for (feature_index, &feature) in input_features
+                    .iter()
+                    .enumerate()
+                    .take(previous_feature_end)
+                    .skip(previous_feature_start)
+                {
+                    let feature_value = i128::from(feature);
                     let gate_term = compiled
                         .ff_weights
                         .gate
@@ -2573,16 +2582,16 @@ fn row_hash_field_values(row: &[FieldElement], digest_index: usize) -> FieldElem
 
 fn twos_complement_expression(bits: &[MPolynomial]) -> MPolynomial {
     let mut expression = MPolynomial::zero();
-    for bit in 0..(WORD_BITS - 1) {
-        expression = expression + bits[bit].clone() * mp_constant(1i128 << bit);
+    for (bit, bit_poly) in bits.iter().enumerate().take(WORD_BITS - 1) {
+        expression = expression + bit_poly.clone() * mp_constant(1i128 << bit);
     }
     expression - bits[WORD_BITS - 1].clone() * mp_constant(1i128 << (WORD_BITS - 1))
 }
 
 fn twos_complement_i128_expression(bits: &[MPolynomial]) -> MPolynomial {
     let mut expression = MPolynomial::zero();
-    for bit in 0..127 {
-        expression = expression + bits[bit].clone() * mp_constant(1i128 << bit);
+    for (bit, bit_poly) in bits.iter().enumerate().take(127) {
+        expression = expression + bit_poly.clone() * mp_constant(1i128 << bit);
     }
     expression + bits[127].clone() * mp_constant(i128::MIN)
 }
@@ -2689,6 +2698,7 @@ fn field_from_i128(value: i128) -> FieldElement {
     }
 }
 
+#[allow(dead_code)]
 fn compare_less_than_witness(left: Word, right: Word) -> bool {
     left < right
 }
@@ -2749,8 +2759,8 @@ mod tests {
         let chunk_row = &skeleton.trace[2];
         let final_feature_row = &skeleton.trace[2 + air.linear_feature_chunk_rows - 1];
         assert_eq!(
-            chunk_row[model.config().d_model + 0],
-            chunk_row[model.config().d_model + 0]
+            chunk_row[model.config().d_model],
+            chunk_row[model.config().d_model]
         );
         assert_eq!(
             chunk_row[air.layout.chunk_index()].value(),

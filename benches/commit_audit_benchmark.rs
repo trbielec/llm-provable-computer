@@ -92,8 +92,15 @@ fn bench_commit_and_audit(c: &mut Criterion) {
         })
     });
 
-    let response =
-        audit_execution(&vm, &m_trace, &w_commitment, &witness, &staged_trace, &request).unwrap();
+    let response = audit_execution(
+        &vm,
+        &m_trace,
+        &w_commitment,
+        &witness,
+        &staged_trace,
+        &request,
+    )
+    .unwrap();
 
     group.bench_function("audit_verify", |b| {
         b.iter(|| verify_audit(black_box(&receipt), black_box(&response), None))

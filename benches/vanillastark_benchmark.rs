@@ -72,7 +72,7 @@ fn build_policy_fixture(
     max_steps: usize,
 ) -> PolicyProofFixture {
     let config = TransformerVmConfig::default();
-    let compiled = ProgramCompiler::default()
+    let compiled = ProgramCompiler
         .compile_source(assembly, config.clone())
         .expect("compile policy program");
     let mut initial_memory = compiled.program().initial_memory().to_vec();

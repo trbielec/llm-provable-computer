@@ -2723,6 +2723,7 @@ impl DirectDecisionCircuit {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn eval_compact_quantified_predicate(
         &self,
         predicate: &CompactQuantifiedPredicate,
@@ -4048,6 +4049,7 @@ impl DirectDecisionAir {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn compact_stage_constraints(
         &self,
         stage: &CompactQuantifiedStage,
@@ -4113,8 +4115,12 @@ impl DirectDecisionAir {
             emitted_ordered_aux,
         );
 
-        for local_row in 0..usize::from(stage.collection.max_items) {
-            let selector = row_selectors[local_row].clone();
+        for (local_row, row_selector) in row_selectors
+            .iter()
+            .enumerate()
+            .take(usize::from(stage.collection.max_items))
+        {
+            let selector = row_selector.clone();
             let active = in_domain.clone()
                 * count_at_least_poly(
                     &count,
@@ -4165,6 +4171,7 @@ impl DirectDecisionAir {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn compact_quantified_predicate_polys(
         &self,
         predicate: &CompactQuantifiedPredicate,
@@ -4740,15 +4747,15 @@ impl DirectDecisionAir {
     }
 }
 
-fn extract_quantifier_pattern<'a>(
-    expr: &'a DecisionBooleanExpr,
-) -> Option<(QuantifierKind, u8, u8, Vec<&'a DecisionBooleanExpr>)> {
+fn extract_quantifier_pattern(
+    expr: &DecisionBooleanExpr,
+) -> Option<(QuantifierKind, u8, u8, Vec<&DecisionBooleanExpr>)> {
     extract_forall_pattern(expr).or_else(|| extract_exists_pattern(expr))
 }
 
-fn extract_forall_pattern<'a>(
-    expr: &'a DecisionBooleanExpr,
-) -> Option<(QuantifierKind, u8, u8, Vec<&'a DecisionBooleanExpr>)> {
+fn extract_forall_pattern(
+    expr: &DecisionBooleanExpr,
+) -> Option<(QuantifierKind, u8, u8, Vec<&DecisionBooleanExpr>)> {
     let mut predicates = Vec::new();
     let mut thresholds = Vec::new();
     let mut current = expr;
@@ -4807,9 +4814,9 @@ fn extract_forall_pattern<'a>(
     }
 }
 
-fn extract_exists_pattern<'a>(
-    expr: &'a DecisionBooleanExpr,
-) -> Option<(QuantifierKind, u8, u8, Vec<&'a DecisionBooleanExpr>)> {
+fn extract_exists_pattern(
+    expr: &DecisionBooleanExpr,
+) -> Option<(QuantifierKind, u8, u8, Vec<&DecisionBooleanExpr>)> {
     let mut predicates = Vec::new();
     let mut thresholds = Vec::new();
     let mut current = expr;

@@ -1086,7 +1086,9 @@ impl PoetVmAir {
                 constraints.push(gated_selector.clone() * (hidden - gate_sum * value_sum));
             }
 
-            for output_idx in 0..OUTPUT_LEN {
+            for (output_idx, expected_out) in
+                expected_output.iter_mut().enumerate().take(OUTPUT_LEN)
+            {
                 let mut out_sum = mp_constant_from_scalar(ff.out_bias[output_idx]);
                 for hidden_idx in 0..self.layout.ff_dim {
                     out_sum = out_sum
@@ -1095,8 +1097,7 @@ impl PoetVmAir {
                                 ff.out.data[output_idx * ff.out.cols + hidden_idx],
                             );
                 }
-                expected_output[output_idx] =
-                    expected_output[output_idx].clone() + selector.clone() * out_sum;
+                *expected_out = expected_out.clone() + selector.clone() * out_sum;
             }
 
             let controls = compiled.controls;

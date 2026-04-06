@@ -9,7 +9,7 @@ fn main() {
         fs::read_to_string("programs/compliance_judge.tvm").expect("Failed to read program");
 
     // 2. Define our inputs (Credit Score: 700, Income: 25000, Debt: 5000)
-    let model = ProgramCompiler::default()
+    let model = ProgramCompiler
         .compile_source(&source, TransformerVmConfig::default())
         .expect("Failed to compile program");
 

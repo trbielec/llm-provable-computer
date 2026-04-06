@@ -9,7 +9,7 @@ fn main() {
 
     // 2. Setup inputs for Rule #1 (Credit Score: 750, Income: 25000)
     let config = TransformerVmConfig::default();
-    let compiler = ProgramCompiler::default();
+    let compiler = ProgramCompiler;
     let model = compiler
         .compile_source(&source, config.clone())
         .expect("Failed to compile program");

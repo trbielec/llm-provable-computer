@@ -77,7 +77,7 @@ impl RescueMerkleTree {
         let mut current_index = index;
 
         for sibling in path {
-            current = if current_index % 2 == 0 {
+            current = if current_index.is_multiple_of(2) {
                 rescue.hash_pair(current, *sibling)
             } else {
                 rescue.hash_pair(*sibling, current)

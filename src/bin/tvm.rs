@@ -580,6 +580,7 @@ fn manual_hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn audit_command(
     program_path: &Path,
     receipt_path: &Path,
