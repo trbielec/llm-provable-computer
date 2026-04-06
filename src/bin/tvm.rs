@@ -200,6 +200,10 @@ enum Command {
         /// Use Metal GPU batch runner (requires metal-batch feature, macOS only).
         #[arg(long)]
         metal: bool,
+        /// After the batch run, verify every result against the native interpreter
+        /// and report mismatches. Useful for input-sweep correctness testing.
+        #[arg(long)]
+        verify_native: bool,
     },
     /// Audit a previously generated execution receipt.
     Audit {
@@ -373,7 +377,16 @@ fn run() -> llm_provable_computer::Result<()> {
             layers,
             attention_mode,
             metal,
-        } => batch_run_command(&program, count, max_steps, layers, attention_mode, metal)?,
+            verify_native,
+        } => batch_run_command(
+            &program,
+            count,
+            max_steps,
+            layers,
+            attention_mode,
+            metal,
+            verify_native,
+        )?,
         Command::Commit {
             program,
             output,
@@ -758,6 +771,7 @@ fn batch_run_command(
     layers: usize,
     attention_mode: Attention2DMode,
     metal: bool,
+    verify_native: bool,
 ) -> llm_provable_computer::Result<()> {
     use llm_provable_computer::batch::{BatchRunResult, BatchRunner};
     use std::sync::Arc;
@@ -779,13 +793,16 @@ fn batch_run_command(
     println!("batch_size: {count}");
     println!("max_steps: {max_steps}");
 
+    // Collect (run_idx, final_state) pairs for optional native verification.
+    let mut batch_finals: Vec<(usize, MachineState)> = Vec::new();
+
     if metal {
         #[cfg(all(feature = "metal-batch", target_os = "macos"))]
         {
             use llm_provable_computer::metal_batch::MetalBatchRunner;
             let runner = MetalBatchRunner::new(Arc::clone(&model), max_steps)?;
             let t0 = std::time::Instant::now();
-            let results = runner.run(initial_states);
+            let results = runner.run(initial_states.clone());
             let elapsed = t0.elapsed();
             let halted = results.iter().filter(|r| r.final_state.halted).count();
             let errors = results.iter().filter(|r| r.result.is_err()).count();
@@ -801,6 +818,9 @@ fn batch_run_command(
             println!("total_steps: {total_steps}");
             println!("elapsed_ms: {elapsed_ms:.1}");
             println!("steps_per_sec: {steps_per_sec:.0}");
+            for r in results {
+                batch_finals.push((r.run_idx, r.final_state));
+            }
         }
         #[cfg(not(all(feature = "metal-batch", target_os = "macos")))]
         {
@@ -811,7 +831,7 @@ fn batch_run_command(
     } else {
         let runner = BatchRunner::new(Arc::clone(&model), max_steps);
         let t0 = std::time::Instant::now();
-        let results: Vec<BatchRunResult> = runner.run(initial_states);
+        let results: Vec<BatchRunResult> = runner.run(initial_states.clone());
         let elapsed = t0.elapsed();
         let halted = results.iter().filter(|r| r.final_state.halted).count();
         let errors = results.iter().filter(|r| r.result.is_err()).count();
@@ -827,6 +847,48 @@ fn batch_run_command(
         println!("total_steps: {total_steps}");
         println!("elapsed_ms: {elapsed_ms:.1}");
         println!("steps_per_sec: {steps_per_sec:.0}");
+        for r in results {
+            batch_finals.push((r.run_idx, r.final_state));
+        }
+    }
+
+    // ── Native verification ────────────────────────────────────────────────
+    if verify_native && !batch_finals.is_empty() {
+        use llm_provable_computer::NativeInterpreter;
+
+        println!("verifying against native interpreter…");
+        let mut mismatches = 0usize;
+        for (run_idx, batch_state) in &batch_finals {
+            let init = &initial_states[*run_idx];
+            let mut native = NativeInterpreter::new_with_state(
+                model.program().clone(),
+                model.config().attention_mode.clone(),
+                init.clone(),
+                max_steps,
+            );
+            let native_result = native.run().expect("native run");
+            let native_state = &native_result.final_state;
+            if batch_state.acc != native_state.acc || batch_state.halted != native_state.halted {
+                mismatches += 1;
+                if mismatches <= 10 {
+                    println!(
+                        "  MISMATCH run {run_idx}: batch acc={} halted={} | native acc={} halted={}",
+                        batch_state.acc,
+                        batch_state.halted,
+                        native_state.acc,
+                        native_state.halted,
+                    );
+                }
+            }
+        }
+        if mismatches == 0 {
+            println!("native_mismatches: 0  ✓ all {} results match", batch_finals.len());
+        } else {
+            println!("native_mismatches: {mismatches}");
+            return Err(VmError::InvalidConfig(format!(
+                "{mismatches} run(s) produced results that diverge from the native interpreter"
+            )));
+        }
     }
 
     Ok(())

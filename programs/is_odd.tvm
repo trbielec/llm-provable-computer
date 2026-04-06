@@ -1,0 +1,10 @@
+; Tests whether the initial ACC value is odd.
+;
+; Input:  initial ACC value (set by the batch runner or caller)
+; Output: final ACC = 1 if input is odd, 0 if input is even
+;
+; Uses bitwise AND to isolate the low bit.
+.memory 1
+
+AND 1        ; ACC = ACC & 1  (0 = even, 1 = odd)
+HALT
