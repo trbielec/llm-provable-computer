@@ -27,6 +27,12 @@ Based on [*Can LLMs Be Computers?*](https://www.percepta.ai/blog/can-llms-be-com
 
 ---
 
+## Current Roadmap
+
+The current roadmap for the hybrid proposal-lane investigation is `docs/roadmaps/current-roadmap.md`.
+
+---
+
 ## Read This First
 
 The same terms mean different things in different papers. In this repo:

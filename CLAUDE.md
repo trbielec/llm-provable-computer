@@ -2,6 +2,10 @@
 llm-provable-computer is an implemented Rust workspace for a deterministic transformer-shaped virtual machine and an in-tree vanilla STARK prover over its execution trace. Milestone 1 and Milestone 2 are complete in the repository; Milestone 3 (STWO integration) is the next major target.
 </identity>
 
+<roadmap>
+Current roadmap: `docs/roadmaps/current-roadmap.md`
+</roadmap>
+
 <stack>
 | Layer | Technology | Version | Notes |
 |-------|------------|---------|-------|
