@@ -24,4 +24,18 @@ impl ProgramCompiler {
         let program = parse_program(source)?;
         self.compile_program(program, config)
     }
+
+    pub fn compile_sources(
+        &self,
+        sources: &[&str],
+        config: TransformerVmConfig,
+    ) -> Result<(TransformerVm, Vec<u8>)> {
+        let mut programs = Vec::new();
+        for source in sources {
+            programs.push(parse_program(source)?);
+        }
+        let (merged_program, entry_points) = Program::merge(&programs)?;
+        let vm = self.compile_program(merged_program, config)?;
+        Ok((vm, entry_points))
+    }
 }
