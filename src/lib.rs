@@ -1,4 +1,9 @@
 pub mod approximate;
+pub mod batch;
+#[cfg(all(feature = "metal-batch", target_os = "macos"))]
+pub mod metal_batch;
+#[cfg(all(feature = "metal-batch", target_os = "macos"))]
+pub use metal_batch::{MetalBatchRunResult, MetalBatchRunner};
 pub mod assembly;
 #[cfg(feature = "burn-model")]
 pub mod burn_model;
@@ -42,6 +47,7 @@ pub use approximate::{
     ApproximateVerificationConfig, AUDIT_NUMERIC_SCALE, AUDIT_NUMERIC_SCALE_F64,
 };
 pub use assembly::parse_program;
+pub use batch::{BatchRunResult, BatchRunner};
 #[cfg(feature = "burn-model")]
 pub use burn_model::{
     load_burn_model, load_burn_model_on_device, save_burn_model, BurnTransformerVm,

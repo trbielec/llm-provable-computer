@@ -39,6 +39,27 @@ impl ExecutionRuntime {
         }
     }
 
+    /// Create a runtime seeded with an explicit initial [`MachineState`].
+    ///
+    /// The state's `memory` slice is used to initialise [`AddressedMemory`];
+    /// its length must equal the program's memory size.
+    pub fn new_with_state(
+        model: TransformerVm,
+        initial_state: MachineState,
+        max_steps: usize,
+    ) -> Self {
+        let memory = AddressedMemory::from_initial(&initial_state.memory);
+        Self {
+            model,
+            memory,
+            trace: vec![initial_state.clone()],
+            events: Vec::new(),
+            state: initial_state,
+            step_count: 0,
+            max_steps,
+        }
+    }
+
     pub fn step(&mut self) -> Result<&MachineState> {
         if execution_complete(&self.state, self.step_count, self.max_steps) {
             return Ok(&self.state);
