@@ -2,8 +2,10 @@ use crate::approximate::{
     canonicalize_values, compare_approximate, dequantize_signed, ApproximateComparisonResult,
     ApproximateVerificationConfig,
 };
+use crate::config::TransformerVmConfig;
 use crate::error::{Result, VmError};
 use crate::freivalds::FreivaldsChallenge;
+use crate::instruction::Program;
 use crate::merkle_trace::MerkleizedTrace;
 use crate::model::{
     SharedTransformerExecutionWitness, SharedTransformerStepWitness, TransformerVm,
@@ -110,6 +112,12 @@ pub struct ApproximateAuditVerificationReport {
     pub passed: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct ReceiptProgramBinding<'a> {
+    program: &'a Program,
+    config: &'a TransformerVmConfig,
+}
+
 pub struct WeightCommitment {
     pub tree: MerkleTree,
 }
@@ -187,6 +195,32 @@ fn hash_bytes(data: &[u8]) -> Vec<u8> {
     hasher.finalize().to_vec()
 }
 
+fn hash_json<T: Serialize>(value: &T) -> Result<Vec<u8>> {
+    let encoded = serde_json::to_vec(value)
+        .map_err(|error| VmError::Serialization(format!("json serialization error: {error}")))?;
+    Ok(hash_bytes(&encoded))
+}
+
+pub fn receipt_program_hash(vm: &TransformerVm) -> Result<Vec<u8>> {
+    hash_json(&ReceiptProgramBinding {
+        program: vm.program(),
+        config: vm.config(),
+    })
+}
+
+pub fn receipt_initial_state_hash(initial_state: &MachineState) -> Result<Vec<u8>> {
+    hash_json(initial_state)
+}
+
+pub fn verify_receipt_bindings(
+    receipt: &ExecutionReceipt,
+    vm: &TransformerVm,
+    initial_state: &MachineState,
+) -> Result<bool> {
+    Ok(receipt.program_hash == receipt_program_hash(vm)?
+        && receipt.initial_state_hash == receipt_initial_state_hash(initial_state)?)
+}
+
 pub fn create_receipt(
     trace: &SharedTransformerStagedTrace,
     program_hash: Vec<u8>,
@@ -217,8 +251,8 @@ pub fn commit_execution(
     let numeric_trace_commitment = NumericTraceCommitment::new(&numeric_rows);
     let weight_commitment = WeightCommitment::new(vm)?;
 
-    let program_hash = vec![0u8; 32];
-    let initial_state_hash = vec![0u8; 32];
+    let program_hash = receipt_program_hash(vm)?;
+    let initial_state_hash = receipt_initial_state_hash(&witness.initial_state)?;
 
     let (receipt, m_trace) = create_receipt(
         &staged_trace,
@@ -738,11 +772,11 @@ mod tests {
                     layer_idx: 0,
                 },
                 operand: 0,
-                input_vector: vec![0.25; 9 + 2 * crate::state::WORD_BITS],
-                ff_gate: vec![0.1; 256],
-                ff_value: vec![0.2; 256],
-                ff_hidden: vec![0.02; 256],
-                ff_output: vec![0.3; 6],
+                input_vector: vec![1.0; 9 + 2 * crate::state::WORD_BITS],
+                ff_gate: vec![2.0; 256],
+                ff_value: vec![3.0; 256],
+                ff_hidden: vec![6.0; 256],
+                ff_output: vec![4.0; 6],
                 transition: SharedTransformerTransitionWitness {
                     pc: 0,
                     acc: 0,

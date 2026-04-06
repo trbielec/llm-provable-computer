@@ -1,7 +1,7 @@
 use llm_provable_computer::approximate::ApproximateVerificationConfig;
 use llm_provable_computer::commit_and_audit::{
-    audit_execution, commit_execution, verify_audit, verify_audit_with_config, AuditRequest,
-    AuditTarget,
+    audit_execution, commit_execution, verify_audit, verify_audit_with_config,
+    verify_receipt_bindings, AuditRequest, AuditTarget,
 };
 use llm_provable_computer::config::TransformerVmConfig;
 use llm_provable_computer::instruction::Program;
@@ -63,6 +63,7 @@ fn test_commit_and_audit_lifecycle() {
     // Commit
     let (receipt, m_trace, w_commitment) = commit_execution(&vm, &witness).unwrap();
     assert_eq!(receipt.step_count, 5);
+    assert!(verify_receipt_bindings(&receipt, &vm, &initial_state).unwrap());
 
     // Audit Request (Step 3 - Transition row, which triggers weight opening)
     let request = AuditRequest {
@@ -99,6 +100,16 @@ fn test_commit_and_audit_lifecycle() {
     let mut tampered_receipt = receipt.clone();
     tampered_receipt.weights_root[0] ^= 0xFF;
     assert!(!verify_audit(&tampered_receipt, &response, None));
+
+    let mut tampered_program_receipt = receipt.clone();
+    tampered_program_receipt.program_hash[0] ^= 0xFF;
+    assert!(!verify_receipt_bindings(&tampered_program_receipt, &vm, &initial_state).unwrap());
+
+    let mut tampered_initial_state_receipt = receipt.clone();
+    tampered_initial_state_receipt.initial_state_hash[0] ^= 0xFF;
+    assert!(
+        !verify_receipt_bindings(&tampered_initial_state_receipt, &vm, &initial_state).unwrap()
+    );
 }
 
 #[test]
