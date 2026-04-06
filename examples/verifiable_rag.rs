@@ -1,3 +1,16 @@
+// CONCEPTUAL EXAMPLE — Percepta lineage (HullKvCache / retrieval-history)
+//
+// This example demonstrates HullKvCache 2D attention as a retrieval mechanism.
+// The "RAG" framing is illustrative; this is not an integration with a real
+// retrieval-augmented generation pipeline.
+//
+// Proof-path caveat:
+//   The STARK proof at the end of this example runs the TVM interpreter from a
+//   fresh default state, NOT from the manually-populated memory history above it.
+//   Proving the retrieval from a pre-populated history requires passing that history
+//   to the prover — that path is not yet wired end-to-end. The proof here attests
+//   to a trivial execution only.
+
 use llm_provable_computer::{Attention2DMode, ProgramCompiler, TransformerVmConfig};
 
 fn main() {
@@ -70,20 +83,21 @@ HALT
         );
     }
 
-    // 5. Generate and Verify STARK Proof
-    // Note: To prove this, we need to pass the final state and memory to the prover.
-    // The current prove_execution_stark runs the interpreter.
-    // We need to make sure the interpreter uses the same history.
+    // 5. Generate and Verify STARK Proof (fresh model — see file-level caveat)
+    // -----------------------------------------------------------------------
+    // prove_execution_stark runs the TVM interpreter from the model's default
+    // initial state, which does NOT include the manually-populated history above.
+    // This proof attests that the compiled program executes correctly from that
+    // fresh state; it does NOT prove the Hull retrieval demonstrated in steps 3–4.
+    //
+    // Wiring the manually-populated history into the prover is future work.
 
-    // Since we manually populated 'memory', we'd need a way to pass that history to the prover.
-    // For now, let's verify that the *concept* of the query works.
-
-    println!("\nGenerating proof of retrieval logic...");
-    // We'll use a slightly different approach to prove the execution of this specific model
+    println!("\nGenerating proof of compiled program execution (fresh-state, not retrieval history)...");
     let proof = llm_provable_computer::prove_execution_stark(&model, 10).expect("Prover failed");
     let is_valid = llm_provable_computer::verify_execution_stark(&proof).expect("Verifier failed");
 
     if is_valid {
-        println!("STARK Proof Verified! The retrieval was mathematically correct according to the HullKvCache.");
+        println!("STARK Proof Verified: the compiled program executed correctly from its default initial state.");
+        println!("(The Hull retrieval above is demonstrated but not yet part of this proof.)");
     }
 }

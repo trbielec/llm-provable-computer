@@ -14,6 +14,10 @@ use std::time::Instant;
 /// 1. Low-Overhead Commitment: The provider issues a Merkleized receipt for the full underwriting trace.
 /// 2. Statistical Audit: A random check using Freivalds' algorithm ensures matrix consistency.
 /// 3. High-Stakes Proof: For the final approved/denied decision, a full STARK proof is generated.
+///
+/// Note on performance figures: the overhead table below is illustrative only.
+/// No benchmark harness currently measures commit latency or throughput at scale.
+/// Treat the relative numbers as architectural intent, not measured results.
 fn main() -> llm_provable_computer::Result<()> {
     println!("--- Verifiable Automated Underwriting End-to-End ---");
 
@@ -119,18 +123,33 @@ fn main() -> llm_provable_computer::Result<()> {
     println!("STARK Proving Time: {:?}", proof_time);
     println!("Proof Size: {} bytes", proof.proof.len());
 
-    // 5. Value Proposition Summary
-    println!("\n--- Value Proposition & Benchmarks ---");
-    println!("| Method           | Soundness    | Latency (Relative) | Overhead | Use Case                |");
-    println!("|------------------|--------------|--------------------|----------|-------------------------|");
-    println!("| Raw Execution    | Trust-based  | 1x                 | 0%       | Local testing           |");
-    println!("| Commit-and-Audit | Statistical  | ~1.05x             | <5%      | Bulk model serving      |");
-    println!("| Vanilla STARK    | Cryptographic| ~500x-1000x        | High     | Final high-stakes audit |");
+    // 5. Value Proposition Summary (measured on this run)
+    let exec_ns = exec_time.as_nanos().max(1);
+    let commit_ratio = commit_time.as_nanos() as f64 / exec_ns as f64;
+    let stark_ratio = proof_time.as_nanos() as f64 / exec_ns as f64;
 
-    println!("\nThis hybrid approach allows the Underwriting system to process 10,000 loans/sec with Receipts,");
+    println!("\n--- Value Proposition (latency measured on this run, release build) ---");
     println!(
-        "while maintaining the ability to mathematically prove any single contested decision."
+        "| Method           | Soundness    | Latency (measured)    | Use Case                |"
     );
+    println!(
+        "|------------------|--------------|-----------------------|-------------------------|"
+    );
+    println!(
+        "| Raw Execution    | Trust-based  | {:>10?} (1x)      | Local testing           |",
+        exec_time
+    );
+    println!(
+        "| Commit-and-Audit | Statistical  | {:>10?} ({:.0}x)     | Bulk model serving      |",
+        commit_time, commit_ratio
+    );
+    println!(
+        "| Vanilla STARK    | Cryptographic| {:>10?} ({:.0}x)  | Final high-stakes audit |",
+        proof_time, stark_ratio
+    );
+    println!();
+    println!("Single-run timings on this machine. For stable numbers, run the criterion");
+    println!("benchmarks: `cargo bench --bench <name>`.");
 
     Ok(())
 }

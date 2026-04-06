@@ -1,3 +1,16 @@
+// CONCEPTUAL EXAMPLE — CommitLLM lineage
+//
+// This example simulates a workflow where an upstream LLM proposes values that are
+// then verified by a deterministic TVM constraint program. The "LLM" here is
+// a hardcoded stand-in; no real language model is integrated or called.
+//
+// What this example actually proves:
+//   - The TVM executed the budget_verifier program correctly for the given inputs.
+//   - The STARK proof attests to the execution trace, not to the LLM's reasoning process.
+//
+// Future work (not demonstrated here): connecting a live model output to TVM inputs
+// such that the audited model boundary is cryptographically bound, not simulated.
+
 use llm_provable_computer::{
     prove_execution_stark, verify_execution_stark, CdmnProgramMetadata, ProgramCompiler,
     TransformerVmConfig,
@@ -12,13 +25,17 @@ fn main() {
         .ok()
         .and_then(|json| serde_json::from_str::<CdmnProgramMetadata>(&json).ok());
 
-    // 2. Simulate a Stochastic "LLM Reasoner" Output
-    // ----------------------------------------------
-    // The LLM was asked: "Propose a budget where R&D is twice Marketing,
+    // 2. Simulate a Stochastic "LLM Reasoner" Output (SIMULATED — not a real LLM call)
+    // ----------------------------------------------------------------------------------
+    // In a real integration an upstream model would supply these values at runtime.
+    // Here they are hardcoded to illustrate the audit workflow.
+    //
+    // Simulated proposal: "Propose a budget where R&D is twice Marketing,
     // and total spend equals 9000."
-    // LLM Hallucination/Proposal: {Marketing: 3000, Research: 6000, Total: 9000}
-    println!("--- Verifiable AI Reasoner Audit ---");
-    println!("Stochastic LLM Proposal: Marketing=3000, Research=6000, Total=9000");
+    // Simulated values: {Marketing: 3000, Research: 6000, Total: 9000}
+    println!("--- Verifiable AI Reasoner Audit (Conceptual Example) ---");
+    println!("Simulated upstream proposal: Marketing=3000, Research=6000, Total=9000");
+    println!("Note: the upstream LLM boundary is simulated; no real model is integrated here.");
 
     let config = TransformerVmConfig::default();
     let compiler = ProgramCompiler;
@@ -64,7 +81,10 @@ fn main() {
         let success_flag = proof.claim.final_state.memory[status_idx];
         let reason_code = proof.claim.final_state.memory[reason_idx];
         println!("\nSTARK Proof VERIFIED!");
-        println!("The LLM's proposal is MATHEMATICALLY GUARANTEED to be correct.");
+        // What this proves: the TVM executed the budget constraint program correctly for
+        // the given input values. It does NOT attest to the LLM's internal reasoning or
+        // that the simulated proposal came from a real model.
+        println!("The TVM execution of the constraint verifier is cryptographically attested.");
         println!(
             "Verification Status Register [{}]: {}",
             status_idx, success_flag
@@ -78,8 +98,8 @@ fn main() {
             println!("Reason Description: {}", reason.description);
         }
         println!("--------------------------------------------------");
-        println!("Emergent Capability: We just proved a probabilistic AI's output");
-        println!("using a deterministic, transformer-shaped virtual machine.");
+        println!("Demonstrated: a deterministic TVM constraint program can audit");
+        println!("values supplied by an upstream source (here, a simulated proposal).");
     } else {
         println!("Proof Verification FAILED!");
     }
