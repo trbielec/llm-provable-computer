@@ -389,7 +389,7 @@ fn lower_boolean(expr: &crate::cdmn::ir::BooleanIr) -> Result<DecisionBooleanExp
         }
         crate::cdmn::ir::BooleanIr::Quantified { .. } => {
             return Err(VmError::InvalidConfig(
-                "DMN decision programs do not support quantified rule conditions".to_string(),
+                "DMN direct decision programs currently support only scalar DMN inputs; quantified rule conditions over collections are not supported. Use cDMN for collection logic.".to_string(),
             ));
         }
     })
@@ -416,7 +416,7 @@ fn lower_value_ref(value_ref: &crate::cdmn::ir::ValueRefIr) -> Result<DecisionVa
         crate::cdmn::ir::ValueSource::Cell(address) => DecisionValueSource::InputCell(address),
         crate::cdmn::ir::ValueSource::BoundField { .. } => {
             return Err(VmError::InvalidConfig(
-                "DMN decision programs do not support bound collection fields".to_string(),
+                "DMN direct decision programs currently support only scalar DMN inputs; bound collection fields are not supported. Use cDMN for collection logic.".to_string(),
             ));
         }
     };
@@ -451,7 +451,7 @@ fn lower_availability_source(
         }
         crate::cdmn::ir::AvailabilitySource::BoundField { .. } => {
             return Err(VmError::InvalidConfig(
-                "DMN decision programs do not support bound availability fields".to_string(),
+                "DMN direct decision programs currently support only scalar DMN inputs; bound availability fields are not supported. Use cDMN for collection logic.".to_string(),
             ));
         }
     })
@@ -766,4 +766,85 @@ fn hash_json<T: Serialize>(value: &T) -> Result<Vec<u8>> {
     let mut hasher = Blake2b512::new();
     hasher.update(encoded);
     Ok(hasher.finalize().to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cdmn::ir::{
+        ArithmeticIr, AvailabilityIr, AvailabilitySource, BindingId, BooleanIr,
+        QuantifiedCollection, ValueRefIr, ValueSource,
+    };
+    use crate::cdmn::{ComparisonOp, QuantifierKind};
+
+    #[test]
+    fn dmn_lowering_rejects_quantified_rule_conditions_with_guidance() {
+        let expr = BooleanIr::Quantified {
+            kind: QuantifierKind::ForAll,
+            collection: QuantifiedCollection {
+                binding: BindingId(0),
+                name: "items".to_string(),
+                count_memory: 0,
+                base_memory: 1,
+                stride: 1,
+                max_items: 1,
+            },
+            predicate: Box::new(BooleanIr::Comparison {
+                lhs: ArithmeticIr::Number(1),
+                op: ComparisonOp::Eq,
+                rhs: ArithmeticIr::Number(1),
+            }),
+        };
+
+        let err = lower_boolean(&expr).unwrap_err();
+        match err {
+            VmError::InvalidConfig(message) => {
+                assert!(message.contains("scalar DMN inputs"));
+                assert!(message.contains("quantified rule conditions"));
+                assert!(message.contains("Use cDMN"));
+            }
+            other => panic!("expected invalid-config error, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dmn_lowering_rejects_bound_collection_fields_with_guidance() {
+        let value_ref = ValueRefIr {
+            source: ValueSource::BoundField {
+                binding: BindingId(0),
+                offset: 0,
+            },
+            availability: AvailabilityIr::Flags {
+                presence: None,
+                unknown: None,
+            },
+        };
+
+        let err = lower_value_ref(&value_ref).unwrap_err();
+        match err {
+            VmError::InvalidConfig(message) => {
+                assert!(message.contains("scalar DMN inputs"));
+                assert!(message.contains("bound collection fields"));
+                assert!(message.contains("Use cDMN"));
+            }
+            other => panic!("expected invalid-config error, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dmn_lowering_rejects_bound_availability_fields_with_guidance() {
+        let err = lower_availability_source(AvailabilitySource::BoundField {
+            binding: BindingId(0),
+            offset: 1,
+        })
+        .unwrap_err();
+        match err {
+            VmError::InvalidConfig(message) => {
+                assert!(message.contains("scalar DMN inputs"));
+                assert!(message.contains("bound availability fields"));
+                assert!(message.contains("Use cDMN"));
+            }
+            other => panic!("expected invalid-config error, found {other:?}"),
+        }
+    }
 }

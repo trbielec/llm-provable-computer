@@ -235,6 +235,12 @@ DMN / cDMN -> direct decision program -> decision
 
 The direct decision flow is usually the clearest proof boundary for decision automation. The transformer path is still valuable as an alternative execution backend and as a bridge to model-serving infrastructure.
 
+Current direct-backend subset notes:
+
+- Direct cDMN STARK supports scalar logic, definitions, inclusive `between`, bounded `forall` / `exists`, and boolean/status-coded availability.
+- Direct cDMN quantified predicates do not yet support nested quantifiers or cross-binding predicates inside a single quantified clause.
+- Direct DMN decision programs currently support scalar DMN input conditions only. Collection-bound and quantified logic should be modeled through cDMN instead.
+
 ---
 
 ## The Assembly Language
