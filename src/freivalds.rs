@@ -2,8 +2,20 @@ use crate::approximate::{
     compare_approximate, dequantize_signed, ApproximateComparisonResult,
     ApproximateVerificationConfig,
 };
-use crate::vanillastark::field::FieldElement;
+use crate::vanillastark::field::{FieldElement, P};
 use serde::{Deserialize, Serialize};
+
+/// Convert a signed `i128` value into a `FieldElement`.
+///
+/// Non-negative values map directly; negative values are represented as `P - |v|`
+/// in the prime field.
+pub fn field_element_from_signed(v: i128) -> FieldElement {
+    if v >= 0 {
+        FieldElement::new(v as u128)
+    } else {
+        FieldElement::new(P - ((-v) as u128))
+    }
+}
 
 /// Represents a challenge for exact Freivalds checks over the STARK field.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,8 +93,8 @@ pub fn precompute_vt_w(
     let cols = weights[0].len();
     let mut vt_w = vec![FieldElement::zero(); cols];
     for j in 0..cols {
-        for i in 0..rows {
-            vt_w[j] = vt_w[j] + (challenge.v[i] * weights[i][j]);
+        for (i, weight_row) in weights.iter().enumerate().take(rows) {
+            vt_w[j] = vt_w[j] + (challenge.v[i] * weight_row[j]);
         }
     }
     vt_w
@@ -104,8 +116,8 @@ pub fn precompute_approximate_vt_w(
     let cols = weights[0].len();
     let mut vt_w = vec![0i128; cols];
     for j in 0..cols {
-        for i in 0..rows {
-            vt_w[j] += challenge.v[i] * weights[i][j];
+        for (i, weight_row) in weights.iter().enumerate().take(rows) {
+            vt_w[j] += challenge.v[i] * weight_row[j];
         }
     }
     vt_w

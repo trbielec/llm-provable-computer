@@ -1,10 +1,13 @@
+use crate::approximate::AUDIT_NUMERIC_SCALE;
 use crate::approximate::{
     canonicalize_values, compare_approximate, dequantize_signed, ApproximateComparisonResult,
     ApproximateVerificationConfig,
 };
 use crate::config::TransformerVmConfig;
 use crate::error::{Result, VmError};
-use crate::freivalds::FreivaldsChallenge;
+use crate::freivalds::{
+    field_element_from_signed, precompute_vt_w, verify_matrix_vector_product, FreivaldsChallenge,
+};
 use crate::instruction::Program;
 use crate::merkle_trace::MerkleizedTrace;
 use crate::model::{
@@ -95,6 +98,7 @@ pub struct OpenedStep {
     pub row: SharedTransformerTraceRow,
     pub merkle_path: Vec<Vec<u8>>,
     pub freivalds_witness: Option<Vec<FieldElement>>,
+    pub freivalds_input: Option<Vec<FieldElement>>,
     pub opened_weight: Option<OpenedWeight>,
     pub approximate_payload: Option<AuditableNumericTraceRow>,
     pub approximate_merkle_path: Option<Vec<Vec<u8>>>,
@@ -297,15 +301,37 @@ pub fn audit_execution(
         let row = &staged_trace.rows[index];
         let merkle_path = m_trace.open(index);
         let mut opened_weight = None;
-        let freivalds_witness = None;
+        let mut freivalds_witness = None;
+        let mut freivalds_input = None;
 
         if let SharedTransformerTraceRow::Transition(t_row) = row {
             let instruction_idx = t_row.transition.pc as usize;
             let (compiled, layer_idx) = vm.compiled_instruction(t_row.transition.pc as u8)?;
+            let numeric_weights = convert_weights_to_numeric(&compiled.ff_weights)?;
+
+            if let Some(challenge) = &request.challenge {
+                let step = witness_step(witness, t_row.step_number)?;
+
+                let input_fe: Vec<FieldElement> = step
+                    .ff_hidden
+                    .iter()
+                    .map(|&v| field_element_from_signed(v as i128))
+                    .collect();
+
+                let out_weights_fe: Vec<Vec<FieldElement>> = numeric_weights
+                    .out
+                    .iter()
+                    .map(|row| row.iter().map(|&v| field_element_from_signed(v)).collect())
+                    .collect();
+
+                freivalds_witness = Some(precompute_vt_w(challenge, &out_weights_fe));
+                freivalds_input = Some(input_fe);
+            }
+
             opened_weight = Some(OpenedWeight {
                 layer_idx,
                 instruction_idx,
-                weights: convert_weights_to_numeric(&compiled.ff_weights)?,
+                weights: numeric_weights,
                 merkle_path: weight_commitment.open(instruction_idx),
             });
         }
@@ -320,6 +346,7 @@ pub fn audit_execution(
             row: row.clone(),
             merkle_path,
             freivalds_witness,
+            freivalds_input,
             opened_weight,
             approximate_payload,
             approximate_merkle_path,
@@ -370,8 +397,27 @@ pub fn verify_audit(
             }
         }
 
-        if let (Some(_challenge), Some(_vt_w)) = (challenge, &step.freivalds_witness) {
-            // The exact Freivalds audit path remains optional and exact-only.
+        if let (Some(challenge), Some(vt_w), Some(input)) =
+            (challenge, &step.freivalds_witness, &step.freivalds_input)
+        {
+            if let (SharedTransformerTraceRow::Transition(t_row), Some(ow)) =
+                (&step.row, &step.opened_weight)
+            {
+                let scale_fe = FieldElement::new(AUDIT_NUMERIC_SCALE as u128);
+                let y: Vec<FieldElement> = t_row
+                    .ff_output
+                    .iter()
+                    .zip(ow.weights.out_bias.iter())
+                    .map(|(&output, &bias)| {
+                        scale_fe * field_element_from_signed(output)
+                            - field_element_from_signed(bias)
+                    })
+                    .collect();
+
+                if !verify_matrix_vector_product(challenge, input, &y, vt_w) {
+                    return false;
+                }
+            }
         }
     }
     true
@@ -501,10 +547,10 @@ fn build_transition_numeric_row(
     })
 }
 
-fn witness_step<'a>(
-    witness: &'a SharedTransformerExecutionWitness,
+fn witness_step(
+    witness: &SharedTransformerExecutionWitness,
     step_number: usize,
-) -> Result<&'a SharedTransformerStepWitness> {
+) -> Result<&SharedTransformerStepWitness> {
     witness
         .steps
         .iter()
@@ -812,6 +858,104 @@ mod tests {
 
         let result = compare_numeric_rows(&left, right, &config);
         assert!(!result.passed);
+    }
+
+    fn run_halt_vm() -> (
+        TransformerVm,
+        SharedTransformerExecutionWitness,
+        TransformerVmConfig,
+    ) {
+        use crate::runtime::ExecutionRuntime;
+        let config = TransformerVmConfig {
+            num_layers: 1,
+            ff_dim: 256,
+            ..TransformerVmConfig::default()
+        };
+        let program = Program::new(vec![Instruction::Halt], 1);
+        let vm = TransformerVm::new(config.clone(), program).expect("model");
+        let mut runtime = ExecutionRuntime::new(vm.clone(), 100);
+        let (_result, witness) = runtime.run_with_witness().expect("run");
+        (vm, witness, config)
+    }
+
+    #[test]
+    fn freivalds_check_passes_honest_execution() {
+        use crate::freivalds::FreivaldsChallenge;
+        use crate::model::OUTPUT_DIM;
+
+        let (vm, witness, _config) = run_halt_vm();
+        let (receipt, m_trace, weight_commitment) =
+            commit_execution(&vm, &witness).expect("commit");
+        let staged_trace =
+            build_shared_transformer_staged_trace(&witness, 256).expect("staged trace");
+
+        let transition_idx = staged_trace
+            .rows
+            .iter()
+            .position(|r| matches!(r, SharedTransformerTraceRow::Transition(_)))
+            .expect("should have a transition row");
+
+        let challenge = FreivaldsChallenge::new(OUTPUT_DIM, b"test_freivalds_seed");
+        let request = AuditRequest {
+            target: AuditTarget::Steps(vec![transition_idx]),
+            challenge: Some(challenge.clone()),
+            approximate_config: None,
+        };
+
+        let response = audit_execution(
+            &vm,
+            &m_trace,
+            &weight_commitment,
+            &witness,
+            &staged_trace,
+            &request,
+        )
+        .expect("audit");
+
+        assert!(response.opened_steps[0].freivalds_witness.is_some());
+        assert!(response.opened_steps[0].freivalds_input.is_some());
+        assert!(verify_audit(&receipt, &response, Some(&challenge)));
+    }
+
+    #[test]
+    fn freivalds_check_rejects_tampered_ff_output() {
+        use crate::freivalds::FreivaldsChallenge;
+        use crate::model::OUTPUT_DIM;
+
+        let (vm, witness, _config) = run_halt_vm();
+        let (receipt, m_trace, weight_commitment) =
+            commit_execution(&vm, &witness).expect("commit");
+        let staged_trace =
+            build_shared_transformer_staged_trace(&witness, 256).expect("staged trace");
+
+        let transition_idx = staged_trace
+            .rows
+            .iter()
+            .position(|r| matches!(r, SharedTransformerTraceRow::Transition(_)))
+            .expect("should have a transition row");
+
+        let challenge = FreivaldsChallenge::new(OUTPUT_DIM, b"test_freivalds_seed");
+        let request = AuditRequest {
+            target: AuditTarget::Steps(vec![transition_idx]),
+            challenge: Some(challenge.clone()),
+            approximate_config: None,
+        };
+
+        let mut response = audit_execution(
+            &vm,
+            &m_trace,
+            &weight_commitment,
+            &witness,
+            &staged_trace,
+            &request,
+        )
+        .expect("audit");
+
+        if let SharedTransformerTraceRow::Transition(ref mut t_row) = response.opened_steps[0].row {
+            t_row.ff_output[0] += 1;
+        }
+
+        assert!(!verify_audit(&receipt, &response, Some(&challenge)));
     }
 
     #[test]
