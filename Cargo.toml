@@ -60,3 +60,7 @@ harness = false
 [[bench]]
 name = "commit_audit_benchmark"
 harness = false
+
+[[bench]]
+name = "batch_benchmark"
+harness = false

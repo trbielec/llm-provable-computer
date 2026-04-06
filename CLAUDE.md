@@ -32,6 +32,7 @@ llm-provable-computer is an implemented Rust workspace for a deterministic trans
   - rejected: softmax and hard-softmax proof paths, `CMP`/`CMPM` compare instructions, non-halted executions
 - Commit-and-Audit: receipts bind `program_hash` and `initial_state_hash`; Freivalds algebraic check is fully implemented (not a stub)
 - Batch execution: `BatchRunner` (CPU rayon) and `MetalBatchRunner` (Apple Silicon GPU, `metal-batch` feature) both available; heterogeneous batch merges multiple programs into a shared PC space via `Program::merge`
+- Benchmarks: `commit_audit_benchmark` reports ~1.18ms commits, ~318µs audit generation, and ~832µs verification (release); the new `batch_benchmark` shows ~325µs for 64 runs, 1.04ms for 256, 3.81ms for 1,024, and 14.7ms for 4,096 CPU `BatchRunner` executions (Criterion with 5s measurements).
 - Current proof is transparent, not zero-knowledge: the public claim includes the program, attention mode, step count, and final state.
 </status>
 
