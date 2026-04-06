@@ -29,10 +29,7 @@ fn compile(source: &str) -> Arc<llm_provable_computer::model::TransformerVm> {
 
 /// Build `n` initial states with `acc = 0, 1, …, n-1` and the program's
 /// default memory.
-fn make_states(
-    model: &llm_provable_computer::model::TransformerVm,
-    n: usize,
-) -> Vec<MachineState> {
+fn make_states(model: &llm_provable_computer::model::TransformerVm, n: usize) -> Vec<MachineState> {
     let base = model.program().initial_memory().to_vec();
     (0..n)
         .map(|i| {
@@ -81,21 +78,12 @@ fn cpu_sweep_double_256() {
 
     for r in &results {
         let expected = native_acc[r.run_idx];
-        assert!(
-            r.result.is_ok(),
-            "run {} failed: {:?}",
-            r.run_idx,
-            r.result
-        );
+        assert!(r.result.is_ok(), "run {} failed: {:?}", r.run_idx, r.result);
         assert!(r.final_state.halted, "run {} did not halt", r.run_idx);
         assert_eq!(
-            r.final_state.acc,
-            expected,
+            r.final_state.acc, expected,
             "run {} (input {}): expected acc={}, got {}",
-            r.run_idx,
-            r.run_idx,
-            expected,
-            r.final_state.acc,
+            r.run_idx, r.run_idx, expected, r.final_state.acc,
         );
         // Explicit check: double of input
         assert_eq!(
@@ -125,23 +113,16 @@ fn cpu_sweep_is_odd_256() {
         assert!(r.result.is_ok(), "run {} failed", r.run_idx);
         assert!(r.final_state.halted, "run {} did not halt", r.run_idx);
         assert_eq!(
-            r.final_state.acc,
-            expected,
+            r.final_state.acc, expected,
             "run {} (input {}): expected acc={}, got {}",
-            r.run_idx,
-            r.run_idx,
-            expected,
-            r.final_state.acc,
+            r.run_idx, r.run_idx, expected, r.final_state.acc,
         );
         // Explicit check: low bit of input
         let expected_bit = (r.run_idx as i64) & 1;
         assert_eq!(
-            r.final_state.acc,
-            expected_bit,
+            r.final_state.acc, expected_bit,
             "run {}: {} & 1 should equal {}",
-            r.run_idx,
-            r.run_idx,
-            expected_bit,
+            r.run_idx, r.run_idx, expected_bit,
         );
     }
 }
@@ -194,11 +175,9 @@ mod metal_sweep {
             assert!(r.result.is_ok(), "run {} failed", r.run_idx);
             assert!(r.final_state.halted, "run {} did not halt", r.run_idx);
             assert_eq!(
-                r.final_state.acc,
-                native_acc[r.run_idx],
+                r.final_state.acc, native_acc[r.run_idx],
                 "Metal/native mismatch on run {} (input {})",
-                r.run_idx,
-                r.run_idx,
+                r.run_idx, r.run_idx,
             );
             assert_eq!(r.final_state.acc, 2 * r.run_idx as i64);
         }
@@ -219,11 +198,9 @@ mod metal_sweep {
             assert!(r.result.is_ok(), "run {} failed", r.run_idx);
             assert!(r.final_state.halted, "run {} did not halt", r.run_idx);
             assert_eq!(
-                r.final_state.acc,
-                native_acc[r.run_idx],
+                r.final_state.acc, native_acc[r.run_idx],
                 "Metal/native mismatch on run {} (input {})",
-                r.run_idx,
-                r.run_idx,
+                r.run_idx, r.run_idx,
             );
             assert_eq!(r.final_state.acc, (r.run_idx as i64) & 1);
         }

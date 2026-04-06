@@ -1,8 +1,6 @@
-use std::sync::Arc;
-use llm_provable_computer::{
-    ProgramCompiler, TransformerVmConfig, MachineState,
-};
 use llm_provable_computer::batch::BatchRunner;
+use llm_provable_computer::{MachineState, ProgramCompiler, TransformerVmConfig};
+use std::sync::Arc;
 
 #[test]
 fn test_heterogeneous_batch_cpu() {
@@ -39,14 +37,14 @@ fn test_heterogeneous_batch_cpu() {
     // Initial states: 2 runs for prog_a, 2 runs for prog_b
     let mut initial_states = Vec::new();
     let initial_memory = model.program().initial_memory().to_vec();
-    
+
     // Prog A: starts at entry_points[0], acc should be 11
     for _ in 0..2 {
         let mut s = MachineState::with_memory(initial_memory.clone());
         s.pc = entry_points[0];
         initial_states.push(s);
     }
-    
+
     // Prog B: starts at entry_points[1], acc should be 10
     for _ in 0..2 {
         let mut s = MachineState::with_memory(initial_memory.clone());

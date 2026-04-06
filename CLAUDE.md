@@ -31,7 +31,7 @@ llm-provable-computer is an implemented Rust workspace for a deterministic trans
   - carry flag: fully constrained; carry-bearing traces (overflow, subtraction borrow) are accepted and carry correctness is verified by the AIR (not a free witness)
   - rejected: softmax and hard-softmax proof paths, `CMP`/`CMPM` compare instructions, non-halted executions
 - Commit-and-Audit: receipts bind `program_hash` and `initial_state_hash`; Freivalds algebraic check is fully implemented (not a stub)
-- Batch execution: `BatchRunner` (CPU rayon) and `MetalBatchRunner` (Apple Silicon GPU, `metal-batch` feature) both available
+- Batch execution: `BatchRunner` (CPU rayon) and `MetalBatchRunner` (Apple Silicon GPU, `metal-batch` feature) both available; heterogeneous batch merges multiple programs into a shared PC space via `Program::merge`
 - Current proof is transparent, not zero-knowledge: the public claim includes the program, attention mode, step count, and final state.
 </status>
 
@@ -96,6 +96,7 @@ scripts/
 | Create a proof | `cargo run --bin tvm -- prove-stark programs/fibonacci.tvm -o /tmp/fib.proof.json` | Uses current vanilla STARK path |
 | Verify a proof | `cargo run --bin tvm -- verify-stark /tmp/fib.proof.json` | Re-checks a saved proof |
 | CPU batch run | `cargo run --bin tvm -- batch-run programs/fibonacci.tvm --count 65536` | N parallel runs via rayon |
+| Heterogeneous batch | `cargo run --bin tvm -- batch-run prog_a.tvm prog_b.tvm --count 65536` | Multiple programs merged into one dispatch |
 | Metal GPU batch run | `cargo run --features metal-batch --bin tvm -- batch-run programs/fibonacci.tvm --count 65536 --metal` | Apple Silicon GPU, macOS only |
 | Review doc drift | `git diff -- README.md CLAUDE.md docs/` | Use before finishing doc/context work |
 </commands>
