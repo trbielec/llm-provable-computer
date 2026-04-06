@@ -1,0 +1,119 @@
+; Counts the number of set bits (popcount) in the low 16 bits of ACC.
+;
+; Input:  ACC = value  (0..65535 for exhaustive 16-bit sweep)
+; Output: ACC = number of set bits in bits 0..15  (0..16)
+;
+; Strategy: test each of the 16 bit positions with AND <2^k>.
+; A non-zero result means that bit is set; branch to increment counter.
+; The saved input is reloaded before each test.
+;
+; Constant execution depth: exactly 85 steps regardless of input.
+; This makes it ideal for exhaustive 2^16 coverage testing of the
+; bitwise AND path (which is now covered by the vanilla STARK AIR).
+;
+; Memory:
+;   MEM[0] = saved input value
+;   MEM[1] = bit count accumulator (0..16)
+
+.memory 2
+
+      STORE 0
+
+      AND   1           ; bit 0
+      JZ    b1
+      LOAD  1
+      ADD   1
+      STORE 1
+b1:   LOAD  0
+      AND   2           ; bit 1
+      JZ    b2
+      LOAD  1
+      ADD   1
+      STORE 1
+b2:   LOAD  0
+      AND   4           ; bit 2
+      JZ    b3
+      LOAD  1
+      ADD   1
+      STORE 1
+b3:   LOAD  0
+      AND   8           ; bit 3
+      JZ    b4
+      LOAD  1
+      ADD   1
+      STORE 1
+b4:   LOAD  0
+      AND   16          ; bit 4
+      JZ    b5
+      LOAD  1
+      ADD   1
+      STORE 1
+b5:   LOAD  0
+      AND   32          ; bit 5
+      JZ    b6
+      LOAD  1
+      ADD   1
+      STORE 1
+b6:   LOAD  0
+      AND   64          ; bit 6
+      JZ    b7
+      LOAD  1
+      ADD   1
+      STORE 1
+b7:   LOAD  0
+      AND   128         ; bit 7
+      JZ    b8
+      LOAD  1
+      ADD   1
+      STORE 1
+b8:   LOAD  0
+      AND   256         ; bit 8
+      JZ    b9
+      LOAD  1
+      ADD   1
+      STORE 1
+b9:   LOAD  0
+      AND   512         ; bit 9
+      JZ    b10
+      LOAD  1
+      ADD   1
+      STORE 1
+b10:  LOAD  0
+      AND   1024        ; bit 10
+      JZ    b11
+      LOAD  1
+      ADD   1
+      STORE 1
+b11:  LOAD  0
+      AND   2048        ; bit 11
+      JZ    b12
+      LOAD  1
+      ADD   1
+      STORE 1
+b12:  LOAD  0
+      AND   4096        ; bit 12
+      JZ    b13
+      LOAD  1
+      ADD   1
+      STORE 1
+b13:  LOAD  0
+      AND   8192        ; bit 13
+      JZ    b14
+      LOAD  1
+      ADD   1
+      STORE 1
+b14:  LOAD  0
+      AND   16384       ; bit 14
+      JZ    b15
+      LOAD  1
+      ADD   1
+      STORE 1
+b15:  LOAD  0
+      AND   32768       ; bit 15
+      JZ    done
+      LOAD  1
+      ADD   1
+      STORE 1
+
+done: LOAD  1
+      HALT
