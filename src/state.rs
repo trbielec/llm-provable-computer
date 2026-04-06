@@ -18,6 +18,13 @@ pub struct MachineState {
     pub memory: Vec<Word>,
 }
 
+impl Default for MachineState {
+    /// Creates a state with a small default memory (16 words, all zeroed).
+    fn default() -> Self {
+        Self::new(16)
+    }
+}
+
 impl MachineState {
     pub fn new(memory_size: usize) -> Self {
         Self {

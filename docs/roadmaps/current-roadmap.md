@@ -7,7 +7,7 @@ Hybrid proposal lane over the provable TVM microkernel
 ## Status
 
 - Date: April 6, 2026
-- Phase: Phase 3 in progress (candidate-parallel evaluation)
+- Phase: Phase 4 in progress (planner integration)
 - Primary issue: `#29`
 - Supporting context: issue `#15` and the supplemental source-map comment on `#29`
 
@@ -18,7 +18,7 @@ Hybrid proposal lane over the provable TVM microkernel
 | Phase 0: freeze and isolate | **complete** | Branch `issue-29-investigation` pushed; baselines in `docs/baselines/`; `proof-boundary.md` reconciled; `JS`/`JNS` added to supported lists; roadmap benchmark command corrected |
 | Phase 1: `ProposalReceipt` | **complete** | `src/proposal_receipt.rs`; 10 integration tests in `tests/proposal_receipt.rs`; all suites green |
 | Phase 2: external state and effect roots | **complete** | `src/effect_root.rs`; 15 integration tests in `tests/effect_root.rs`; all suites green |
-| Phase 3: candidate-parallel evaluation | not started | — |
+| Phase 3: candidate-parallel evaluation | **complete** | `src/candidate_eval.rs`; 6 unit + 10 integration tests; `MachineState::Default` added to `src/state.rs`; all suites green |
 | Phase 4: planner integration | not started | — |
 | Phase 5: serving-side overlap experiments | not started | — |
 
@@ -251,7 +251,7 @@ Exit criteria:
 - external state is explicit, typed, and hash-bound,
 - existing deterministic VM semantics remain unchanged by default.
 
-## Phase 3: candidate-parallel evaluation
+## Phase 3: candidate-parallel evaluation — COMPLETE
 
 Objective:
 

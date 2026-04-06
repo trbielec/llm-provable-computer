@@ -9,6 +9,7 @@ pub mod assembly;
 pub mod burn_model;
 #[cfg(feature = "burn-model")]
 pub mod burn_runtime;
+pub mod candidate_eval;
 pub mod cdmn;
 pub mod commit_and_audit;
 pub mod compiler;
