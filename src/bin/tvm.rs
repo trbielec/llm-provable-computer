@@ -177,6 +177,30 @@ enum Command {
         )]
         attention_mode: Attention2DMode,
     },
+    /// Run a program across N independent initial states in parallel (CPU batch).
+    BatchRun {
+        /// Path to the source `.tvm` program.
+        program: PathBuf,
+        /// Number of independent runs.
+        #[arg(long, default_value_t = 64)]
+        count: usize,
+        /// Maximum number of execution steps per run.
+        #[arg(long, default_value_t = 512)]
+        max_steps: usize,
+        /// Number of transformer layers.
+        #[arg(long, default_value_t = 1)]
+        layers: usize,
+        /// Attention mode to use for memory reads.
+        #[arg(
+            long,
+            default_value = "average-hard",
+            value_parser = parse_attention_mode
+        )]
+        attention_mode: Attention2DMode,
+        /// Use Metal GPU batch runner (requires metal-batch feature, macOS only).
+        #[arg(long)]
+        metal: bool,
+    },
     /// Audit a previously generated execution receipt.
     Audit {
         /// Path to the source `.tvm` program.
@@ -342,6 +366,14 @@ fn run() -> llm_provable_computer::Result<()> {
         Command::VerifyStark { proof } => verify_stark_command(&proof)?,
         Command::AggregateProofs { proofs, output } => aggregate_proofs_command(&proofs, &output)?,
         Command::VerifyAggregate { proof } => verify_aggregate_command(&proof)?,
+        Command::BatchRun {
+            program,
+            count,
+            max_steps,
+            layers,
+            attention_mode,
+            metal,
+        } => batch_run_command(&program, count, max_steps, layers, attention_mode, metal)?,
         Command::Commit {
             program,
             output,
@@ -719,6 +751,87 @@ fn save_receipt(
     Ok(())
 }
 
+fn batch_run_command(
+    program: &Path,
+    count: usize,
+    max_steps: usize,
+    layers: usize,
+    attention_mode: Attention2DMode,
+    metal: bool,
+) -> llm_provable_computer::Result<()> {
+    use llm_provable_computer::batch::{BatchRunResult, BatchRunner};
+    use std::sync::Arc;
+
+    let model = Arc::new(compile_model(program, layers, attention_mode)?);
+    let initial_memory = model.program().initial_memory().to_vec();
+
+    // Generate `count` initial states with acc = 0, 1, …, count-1.
+    let initial_states: Vec<MachineState> = (0..count)
+        .map(|i| {
+            let mut s = MachineState::with_memory(initial_memory.clone());
+            s.acc = i as i64;
+            s
+        })
+        .collect();
+
+    println!("program: {}", program.display());
+    println!("backend: {}", if metal { "metal" } else { "cpu-rayon" });
+    println!("batch_size: {count}");
+    println!("max_steps: {max_steps}");
+
+    if metal {
+        #[cfg(all(feature = "metal-batch", target_os = "macos"))]
+        {
+            use llm_provable_computer::metal_batch::MetalBatchRunner;
+            let runner = MetalBatchRunner::new(Arc::clone(&model), max_steps)?;
+            let t0 = std::time::Instant::now();
+            let results = runner.run(initial_states);
+            let elapsed = t0.elapsed();
+            let halted = results.iter().filter(|r| r.final_state.halted).count();
+            let errors = results.iter().filter(|r| r.result.is_err()).count();
+            let total_steps: usize = results
+                .iter()
+                .filter_map(|r| r.result.as_ref().ok())
+                .map(|r| r.steps)
+                .sum();
+            let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
+            let steps_per_sec = total_steps as f64 / elapsed.as_secs_f64();
+            println!("halted_runs: {halted}");
+            println!("error_runs: {errors}");
+            println!("total_steps: {total_steps}");
+            println!("elapsed_ms: {elapsed_ms:.1}");
+            println!("steps_per_sec: {steps_per_sec:.0}");
+        }
+        #[cfg(not(all(feature = "metal-batch", target_os = "macos")))]
+        {
+            return Err(VmError::InvalidConfig(
+                "--metal requires the `metal-batch` feature on macOS".to_string(),
+            ));
+        }
+    } else {
+        let runner = BatchRunner::new(Arc::clone(&model), max_steps);
+        let t0 = std::time::Instant::now();
+        let results: Vec<BatchRunResult> = runner.run(initial_states);
+        let elapsed = t0.elapsed();
+        let halted = results.iter().filter(|r| r.final_state.halted).count();
+        let errors = results.iter().filter(|r| r.result.is_err()).count();
+        let total_steps: usize = results
+            .iter()
+            .filter_map(|r| r.result.as_ref().ok())
+            .map(|r| r.steps)
+            .sum();
+        let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
+        let steps_per_sec = total_steps as f64 / elapsed.as_secs_f64();
+        println!("halted_runs: {halted}");
+        println!("error_runs: {errors}");
+        println!("total_steps: {total_steps}");
+        println!("elapsed_ms: {elapsed_ms:.1}");
+        println!("steps_per_sec: {steps_per_sec:.0}");
+    }
+
+    Ok(())
+}
+
 fn compile_model(
     program: &Path,
     layers: usize,
@@ -1062,8 +1175,11 @@ fn needs_run_subcommand(first_arg: &str) -> bool {
                 | "export-onnx"
                 | "prove-stark"
                 | "verify-stark"
+                | "aggregate-proofs"
+                | "verify-aggregate"
                 | "commit"
                 | "audit"
+                | "batch-run"
                 | "help"
         )
 }
