@@ -89,8 +89,12 @@ impl ColumnLayout {
         MACHINE_STATE_PREFIX + self.memory_size + bit
     }
 
+    fn operand_bit(&self, bit: usize) -> usize {
+        MACHINE_STATE_PREFIX + self.memory_size + WORD_BITS + bit
+    }
+
     fn acc_inv(&self) -> usize {
-        MACHINE_STATE_PREFIX + self.memory_size + WORD_BITS
+        MACHINE_STATE_PREFIX + self.memory_size + 2 * WORD_BITS
     }
 
     fn sp_nonzero_inv(&self) -> usize {
@@ -106,8 +110,8 @@ impl ColumnLayout {
     }
 
     fn register_count(&self) -> usize {
-        // Machine State + WORD_BITS for ACC + 3 Inverses
-        self.machine_state_register_count() + WORD_BITS + 3
+        // Machine State + WORD_BITS for ACC + WORD_BITS for Operand + 3 Inverses
+        self.machine_state_register_count() + 2 * WORD_BITS + 3
     }
 }
 
@@ -195,6 +199,11 @@ impl VmAir {
             .collect();
         let current_sign = current_acc_bits[WORD_BITS - 1].clone();
 
+        // Range Proof: Bit-decomposition of current operand
+        let current_operand_bits: Vec<MPolynomial> = (0..WORD_BITS)
+            .map(|bit| current[self.layout.operand_bit(bit)].clone())
+            .collect();
+
         let one = mp_constant(1);
         let zero = MPolynomial::zero();
         let current_stack_read = self.stack_read_expression(&current_sp, &current_memory);
@@ -207,6 +216,7 @@ impl VmAir {
         let mut expected_next_carry = next_carry.clone(); // Temporarily match witness for stability
         let mut expected_next_halted = MPolynomial::zero();
         let mut expected_next_memory = vec![MPolynomial::zero(); self.layout.memory_size];
+        let mut expected_operand_bit_sum = MPolynomial::zero();
         let mut push_or_call_selector = MPolynomial::zero();
         let mut pop_or_ret_selector = MPolynomial::zero();
 
@@ -525,13 +535,140 @@ impl VmAir {
                             + pc_selectors[pc].clone() * current_memory[index].clone();
                     }
                 }
-                Instruction::AndImmediate(_)
-                | Instruction::AndMemory(_)
-                | Instruction::OrImmediate(_)
-                | Instruction::OrMemory(_)
-                | Instruction::XorImmediate(_)
-                | Instruction::XorMemory(_) => {
-                    unreachable!("unsupported instructions are filtered before AIR construction")
+                Instruction::AndImmediate(value) => {
+                    let operand = mp_constant(i128::from(value));
+                    expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
+                    expected_operand_bit_sum =
+                        expected_operand_bit_sum + selector.clone() * operand;
+                    // AND: result_bit[i] = acc_bit[i] * operand_bit[i]
+                    let mut result_bits = Vec::new();
+                    for i in 0..WORD_BITS {
+                        result_bits
+                            .push(current_acc_bits[i].clone() * current_operand_bits[i].clone());
+                    }
+                    expected_next_acc =
+                        expected_next_acc + selector.clone() * bitwise_result_sum(&result_bits);
+                    expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
+                    expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
+                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    for (index, expected) in expected_next_memory.iter_mut().enumerate() {
+                        *expected = expected.clone()
+                            + pc_selectors[pc].clone() * current_memory[index].clone();
+                    }
+                }
+                Instruction::AndMemory(address) => {
+                    let operand = current_memory[address as usize].clone();
+                    expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
+                    expected_operand_bit_sum =
+                        expected_operand_bit_sum + selector.clone() * operand;
+                    let mut result_bits = Vec::new();
+                    for i in 0..WORD_BITS {
+                        result_bits
+                            .push(current_acc_bits[i].clone() * current_operand_bits[i].clone());
+                    }
+                    expected_next_acc =
+                        expected_next_acc + selector.clone() * bitwise_result_sum(&result_bits);
+                    expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
+                    expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
+                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    for (index, expected) in expected_next_memory.iter_mut().enumerate() {
+                        *expected = expected.clone()
+                            + pc_selectors[pc].clone() * current_memory[index].clone();
+                    }
+                }
+                Instruction::OrImmediate(value) => {
+                    let operand = mp_constant(i128::from(value));
+                    expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
+                    expected_operand_bit_sum =
+                        expected_operand_bit_sum + selector.clone() * operand;
+                    // OR: result_bit[i] = a + b - a*b
+                    let mut result_bits = Vec::new();
+                    for i in 0..WORD_BITS {
+                        result_bits.push(
+                            current_acc_bits[i].clone() + current_operand_bits[i].clone()
+                                - current_acc_bits[i].clone() * current_operand_bits[i].clone(),
+                        );
+                    }
+                    expected_next_acc =
+                        expected_next_acc + selector.clone() * bitwise_result_sum(&result_bits);
+                    expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
+                    expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
+                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    for (index, expected) in expected_next_memory.iter_mut().enumerate() {
+                        *expected = expected.clone()
+                            + pc_selectors[pc].clone() * current_memory[index].clone();
+                    }
+                }
+                Instruction::OrMemory(address) => {
+                    let operand = current_memory[address as usize].clone();
+                    expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
+                    expected_operand_bit_sum =
+                        expected_operand_bit_sum + selector.clone() * operand;
+                    let mut result_bits = Vec::new();
+                    for i in 0..WORD_BITS {
+                        result_bits.push(
+                            current_acc_bits[i].clone() + current_operand_bits[i].clone()
+                                - current_acc_bits[i].clone() * current_operand_bits[i].clone(),
+                        );
+                    }
+                    expected_next_acc =
+                        expected_next_acc + selector.clone() * bitwise_result_sum(&result_bits);
+                    expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
+                    expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
+                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    for (index, expected) in expected_next_memory.iter_mut().enumerate() {
+                        *expected = expected.clone()
+                            + pc_selectors[pc].clone() * current_memory[index].clone();
+                    }
+                }
+                Instruction::XorImmediate(value) => {
+                    let operand = mp_constant(i128::from(value));
+                    expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
+                    expected_operand_bit_sum =
+                        expected_operand_bit_sum + selector.clone() * operand;
+                    // XOR: result_bit[i] = a + b - 2*a*b
+                    let mut result_bits = Vec::new();
+                    for i in 0..WORD_BITS {
+                        result_bits.push(
+                            current_acc_bits[i].clone() + current_operand_bits[i].clone()
+                                - mp_constant(2)
+                                    * current_acc_bits[i].clone()
+                                    * current_operand_bits[i].clone(),
+                        );
+                    }
+                    expected_next_acc =
+                        expected_next_acc + selector.clone() * bitwise_result_sum(&result_bits);
+                    expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
+                    expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
+                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    for (index, expected) in expected_next_memory.iter_mut().enumerate() {
+                        *expected = expected.clone()
+                            + pc_selectors[pc].clone() * current_memory[index].clone();
+                    }
+                }
+                Instruction::XorMemory(address) => {
+                    let operand = current_memory[address as usize].clone();
+                    expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
+                    expected_operand_bit_sum =
+                        expected_operand_bit_sum + selector.clone() * operand;
+                    let mut result_bits = Vec::new();
+                    for i in 0..WORD_BITS {
+                        result_bits.push(
+                            current_acc_bits[i].clone() + current_operand_bits[i].clone()
+                                - mp_constant(2)
+                                    * current_acc_bits[i].clone()
+                                    * current_operand_bits[i].clone(),
+                        );
+                    }
+                    expected_next_acc =
+                        expected_next_acc + selector.clone() * bitwise_result_sum(&result_bits);
+                    expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
+                    expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
+                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    for (index, expected) in expected_next_memory.iter_mut().enumerate() {
+                        *expected = expected.clone()
+                            + pc_selectors[pc].clone() * current_memory[index].clone();
+                    }
                 }
             }
         }
@@ -541,7 +678,7 @@ impl VmAir {
             valid_sp,
             current_zero.clone() * (current_zero.clone() - one.clone()),
             current[HALTED].clone(),
-            current[CARRY].clone(),
+            current[CARRY].clone() * (current[CARRY].clone() - one.clone()),
             next_pc - expected_next_pc,
             next_acc.clone() - expected_next_acc,
             next_sp - expected_next_sp,
@@ -556,6 +693,11 @@ impl VmAir {
             constraints.push(bit.clone() * (bit.clone() - one.clone()));
         }
 
+        // Bit booleanity constraints for operand bits
+        for bit in &current_operand_bits {
+            constraints.push(bit.clone() * (bit.clone() - one.clone()));
+        }
+
         // Bit integrity constraint for signed two's-complement ACC.
         let mut bit_sum = MPolynomial::zero();
         for (i, acc_bit) in current_acc_bits.iter().enumerate().take(WORD_BITS - 1) {
@@ -564,6 +706,15 @@ impl VmAir {
         bit_sum = bit_sum
             - current_acc_bits[WORD_BITS - 1].clone() * mp_constant(1i128 << (WORD_BITS - 1));
         constraints.push(current_acc - bit_sum);
+
+        // Operand bit integrity constraint: operand_bits must reconstruct to expected_operand_bit_sum.
+        let mut operand_bit_sum = MPolynomial::zero();
+        for (i, bit) in current_operand_bits.iter().enumerate().take(WORD_BITS - 1) {
+            operand_bit_sum = operand_bit_sum + bit.clone() * mp_constant(1 << i);
+        }
+        operand_bit_sum = operand_bit_sum
+            - current_operand_bits[WORD_BITS - 1].clone() * mp_constant(1i128 << (WORD_BITS - 1));
+        constraints.push(operand_bit_sum - expected_operand_bit_sum);
 
         if !self.layout.memory_size.is_zero() {
             constraints.push(
@@ -647,11 +798,6 @@ pub fn estimate_execution_stark_cost(
             result.steps
         )));
     }
-    if interpreter.trace().iter().any(|state| state.carry_flag) {
-        return Err(VmError::UnsupportedProof(
-            "overflowing arithmetic is not supported by the vanilla STARK AIR".to_string(),
-        ));
-    }
 
     let air = VmAir::new(model.program().clone());
     let transition_constraints = air.transition_constraints();
@@ -700,14 +846,9 @@ pub fn prove_execution_stark_with_options(
             result.steps
         )));
     }
-    if interpreter.trace().iter().any(|state| state.carry_flag) {
-        return Err(VmError::UnsupportedProof(
-            "overflowing arithmetic is not supported by the vanilla STARK AIR".to_string(),
-        ));
-    }
 
     let air = VmAir::new(model.program().clone());
-    let trace = execution_trace_rows(&air.layout, interpreter.trace());
+    let trace = execution_trace_rows(&air.layout, model.program(), interpreter.trace());
     let claim = VanillaStarkExecutionClaim {
         program: model.program().clone(),
         attention_mode: model.config().attention_mode.clone(),
@@ -826,12 +967,7 @@ fn validate_proof_inputs(program: &Program, attention_mode: &Attention2DMode) ->
 
     for instruction in program.instructions() {
         match instruction {
-            Instruction::AndImmediate(_)
-            | Instruction::AndMemory(_)
-            | Instruction::OrImmediate(_)
-            | Instruction::OrMemory(_)
-            | Instruction::XorImmediate(_)
-            | Instruction::XorMemory(_) => {
+            Instruction::CmpImmediate(_) | Instruction::CmpMemory(_) => {
                 return Err(VmError::UnsupportedProof(format!(
                     "instruction `{instruction}` is not yet supported by the vanilla STARK AIR"
                 )));
@@ -843,7 +979,11 @@ fn validate_proof_inputs(program: &Program, attention_mode: &Attention2DMode) ->
     Ok(())
 }
 
-fn execution_trace_rows(layout: &ColumnLayout, trace: &[MachineState]) -> Vec<Vec<FieldElement>> {
+fn execution_trace_rows(
+    layout: &ColumnLayout,
+    program: &Program,
+    trace: &[MachineState],
+) -> Vec<Vec<FieldElement>> {
     trace
         .iter()
         .map(|state| {
@@ -873,6 +1013,17 @@ fn execution_trace_rows(layout: &ColumnLayout, trace: &[MachineState]) -> Vec<Ve
                 }
             }
 
+            // Compute operand for this instruction and store bit decomposition.
+            let operand = compute_operand(program, state);
+            let operand_val = operand as u64;
+            for bit in 0..WORD_BITS {
+                if (operand_val >> bit) & 1 == 1 {
+                    row[layout.operand_bit(bit)] = FieldElement::one();
+                } else {
+                    row[layout.operand_bit(bit)] = FieldElement::zero();
+                }
+            }
+
             let inv_start = layout.acc_inv();
             row[inv_start] = inverse_or_zero(acc);
             row[inv_start + 1] = inverse_or_zero(sp);
@@ -880,6 +1031,24 @@ fn execution_trace_rows(layout: &ColumnLayout, trace: &[MachineState]) -> Vec<Ve
             row
         })
         .collect()
+}
+
+/// Returns the operand value for bitwise instructions (AND, OR, XOR).
+/// All other instructions return 0 — the operand bit columns are unused for them.
+fn compute_operand(program: &Program, state: &MachineState) -> i64 {
+    match program.instruction_at(state.pc) {
+        Ok(instr) => {
+            use crate::instruction::Instruction::*;
+            match instr {
+                AndImmediate(v) | OrImmediate(v) | XorImmediate(v) => v,
+                AndMemory(addr) | OrMemory(addr) | XorMemory(addr) => {
+                    state.memory.get(addr as usize).copied().unwrap_or(0)
+                }
+                _ => 0,
+            }
+        }
+        _ => 0,
+    }
 }
 
 fn state_public_registers(layout: &ColumnLayout, state: &MachineState) -> Vec<FieldElement> {
@@ -911,6 +1080,15 @@ fn lagrange_selector(variable: &MPolynomial, domain: &[i128], point: i128) -> MP
             selector * (variable.clone() - mp_constant(other)) * MPolynomial::constant(denominator);
     }
     selector
+}
+
+/// Reconstruct a signed two's-complement value from result bits.
+fn bitwise_result_sum(result_bits: &[MPolynomial]) -> MPolynomial {
+    let mut sum = MPolynomial::zero();
+    for (i, bit) in result_bits.iter().enumerate().take(WORD_BITS - 1) {
+        sum = sum + bit.clone() * mp_constant(1 << i);
+    }
+    sum - result_bits[WORD_BITS - 1].clone() * mp_constant(1i128 << (WORD_BITS - 1))
 }
 
 fn mp_constant(value: i128) -> MPolynomial {
@@ -1265,5 +1443,133 @@ HALT
 
         assert_eq!(loaded, proof);
         assert!(verify_execution_stark(&loaded).expect("verify"));
+    }
+
+    #[test]
+    fn no_carry_simple_execution_round_trips_through_stark_proof() {
+        // Simple execution without any carry flags.
+        // This test verifies that the booleanity constraint on carry
+        // doesn't break non-carry executions.
+        let source = "\
+.memory 1
+LOADI 5
+ADD 3
+HALT
+";
+        let model = ProgramCompiler
+            .compile_source(source, TransformerVmConfig::default())
+            .expect("compile");
+        let proof = prove_execution_stark(&model, 32).expect("prove");
+        assert!(verify_execution_stark(&proof).expect("verify"));
+        assert_eq!(proof.claim.final_state.acc, 8);
+        assert!(!proof.claim.final_state.carry_flag);
+    }
+
+    #[test]
+    fn and_immediate_round_trips_through_stark_proof() {
+        // AND instruction with immediate operand.
+        let source = "\
+.memory 1
+LOADI 15
+AND 7
+HALT
+";
+        let model = ProgramCompiler
+            .compile_source(source, TransformerVmConfig::default())
+            .expect("compile");
+        let proof = prove_execution_stark(&model, 32).expect("prove");
+        assert!(verify_execution_stark(&proof).expect("verify"));
+        // 15 & 7 = 0b1111 & 0b0111 = 0b0111 = 7
+        assert_eq!(proof.claim.final_state.acc, 7);
+    }
+
+    #[test]
+    fn or_immediate_round_trips_through_stark_proof() {
+        // OR instruction with immediate operand.
+        let source = "\
+.memory 1
+LOADI 8
+OR 4
+HALT
+";
+        let model = ProgramCompiler
+            .compile_source(source, TransformerVmConfig::default())
+            .expect("compile");
+        let proof = prove_execution_stark(&model, 32).expect("prove");
+        assert!(verify_execution_stark(&proof).expect("verify"));
+        // 8 | 4 = 0b1000 | 0b0100 = 0b1100 = 12
+        assert_eq!(proof.claim.final_state.acc, 12);
+    }
+
+    #[test]
+    fn xor_immediate_round_trips_through_stark_proof() {
+        // XOR instruction with immediate operand.
+        let source = "\
+.memory 1
+LOADI 15
+XOR 7
+HALT
+";
+        let model = ProgramCompiler
+            .compile_source(source, TransformerVmConfig::default())
+            .expect("compile");
+        let proof = prove_execution_stark(&model, 32).expect("prove");
+        assert!(verify_execution_stark(&proof).expect("verify"));
+        // 15 ^ 7 = 0b1111 ^ 0b0111 = 0b1000 = 8
+        assert_eq!(proof.claim.final_state.acc, 8);
+    }
+
+    #[test]
+    fn and_memory_round_trips_through_stark_proof() {
+        // AND instruction with memory operand.
+        let source = "\
+.memory 2
+LOADI 12
+ANDM 1
+HALT
+";
+        let model = ProgramCompiler
+            .compile_source(source, TransformerVmConfig::default())
+            .expect("compile");
+        let proof = prove_execution_stark(&model, 32).expect("prove");
+        assert!(verify_execution_stark(&proof).expect("verify"));
+        // 12 & 0 = 0
+        assert_eq!(proof.claim.final_state.acc, 0);
+    }
+
+    #[test]
+    fn or_memory_round_trips_through_stark_proof() {
+        // OR instruction with memory operand.
+        let source = "\
+.memory 2
+LOADI 8
+ORM 1
+HALT
+";
+        let model = ProgramCompiler
+            .compile_source(source, TransformerVmConfig::default())
+            .expect("compile");
+        let proof = prove_execution_stark(&model, 32).expect("prove");
+        assert!(verify_execution_stark(&proof).expect("verify"));
+        // 8 | 0 = 8 (memory at address 1 is 0)
+        assert_eq!(proof.claim.final_state.acc, 8);
+    }
+
+    #[test]
+    fn xor_memory_round_trips_through_stark_proof() {
+        // XOR instruction with memory operand.
+        let source = "\
+.memory 2
+LOADI 5
+XORM 1
+HALT
+";
+        let model = ProgramCompiler
+            .compile_source(source, TransformerVmConfig::default())
+            .expect("compile");
+        let proof = prove_execution_stark(&model, 32).expect("prove");
+        assert!(verify_execution_stark(&proof).expect("verify"));
+        // 5 ^ 0 = 5 (memory at address 1 is 0)
+        assert_eq!(proof.claim.final_state.acc, 5);
     }
 }

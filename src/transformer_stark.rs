@@ -580,10 +580,39 @@ pub struct SharedTransformerStagedSkeletonProvingReport {
     pub profile: SharedTransformerStagedSkeletonProvingProfile,
 }
 
+/// A transformer forward-pass execution claim (public input for proof verification).
+///
+/// This is currently an alias for [`SharedTransformerStagedSkeletonClaim`], as the
+/// staged-skeleton representation is the canonical forward-pass proof surface in this prover.
+/// The names "forward-pass" and "staged-skeleton" refer to the same proof structure.
 pub type SharedTransformerForwardPassClaim = SharedTransformerStagedSkeletonClaim;
+
+/// A transformer forward-pass execution proof.
+///
+/// This is currently an alias for [`SharedTransformerStagedSkeletonProof`], as the
+/// staged-skeleton representation is the canonical forward-pass proof surface in this prover.
+/// The names "forward-pass" and "staged-skeleton" refer to the same proof structure.
 pub type SharedTransformerForwardPassProof = SharedTransformerStagedSkeletonProof;
+
+/// Cost estimate for a transformer forward-pass STARK proof.
+///
+/// This is currently an alias for [`SharedTransformerStagedSkeletonCostEstimate`], as the
+/// staged-skeleton representation is the canonical forward-pass proof surface in this prover.
+/// The names "forward-pass" and "staged-skeleton" refer to the same proof structure.
 pub type SharedTransformerForwardPassCostEstimate = SharedTransformerStagedSkeletonCostEstimate;
+
+/// Timing profile for a transformer forward-pass STARK proof.
+///
+/// This is currently an alias for [`SharedTransformerStagedSkeletonProvingProfile`], as the
+/// staged-skeleton representation is the canonical forward-pass proof surface in this prover.
+/// The names "forward-pass" and "staged-skeleton" refer to the same proof structure.
 pub type SharedTransformerForwardPassProvingProfile = SharedTransformerStagedSkeletonProvingProfile;
+
+/// Proof with timing profile for a transformer forward-pass STARK.
+///
+/// This is currently an alias for [`SharedTransformerStagedSkeletonProvingReport`], as the
+/// staged-skeleton representation is the canonical forward-pass proof surface in this prover.
+/// The names "forward-pass" and "staged-skeleton" refer to the same proof structure.
 pub type SharedTransformerForwardPassProvingReport = SharedTransformerStagedSkeletonProvingReport;
 
 #[derive(Debug, Clone)]
@@ -1808,6 +1837,11 @@ pub fn prove_shared_transformer_staged_skeleton_stark(
     )
 }
 
+/// Prove a transformer forward-pass execution.
+///
+/// This delegates to [`prove_shared_transformer_staged_skeleton_stark`]; the staged-skeleton
+/// representation is the canonical forward-pass proof surface. The caller may use either
+/// naming family (`ForwardPass*` or `StagedSkeleton*`) interchangeably.
 pub fn prove_shared_transformer_forward_pass_stark(
     model: &TransformerVm,
     max_steps: usize,
@@ -1833,6 +1867,11 @@ pub fn prove_shared_transformer_staged_skeleton_stark_with_options(
     )
 }
 
+/// Prove a transformer forward-pass execution with explicit proof options.
+///
+/// This delegates to [`prove_shared_transformer_staged_skeleton_stark_with_options`]; the staged-skeleton
+/// representation is the canonical forward-pass proof surface. The caller may use either
+/// naming family (`ForwardPass*` or `StagedSkeleton*`) interchangeably.
 pub fn prove_shared_transformer_forward_pass_stark_with_options(
     model: &TransformerVm,
     max_steps: usize,
@@ -1860,6 +1899,11 @@ pub fn prove_shared_transformer_staged_skeleton_stark_profiled(
     )
 }
 
+/// Prove a transformer forward-pass execution and collect timing profile.
+///
+/// This delegates to [`prove_shared_transformer_staged_skeleton_stark_profiled`]; the staged-skeleton
+/// representation is the canonical forward-pass proof surface. The caller may use either
+/// naming family (`ForwardPass*` or `StagedSkeleton*`) interchangeably.
 pub fn prove_shared_transformer_forward_pass_stark_profiled(
     model: &TransformerVm,
     max_steps: usize,
@@ -1942,6 +1986,11 @@ pub fn estimate_shared_transformer_staged_skeleton_stark_cost(
     })
 }
 
+/// Estimate the cost of a transformer forward-pass STARK proof.
+///
+/// This delegates to [`estimate_shared_transformer_staged_skeleton_stark_cost`]; the staged-skeleton
+/// representation is the canonical forward-pass proof surface. The caller may use either
+/// naming family (`ForwardPass*` or `StagedSkeleton*`) interchangeably.
 pub fn estimate_shared_transformer_forward_pass_stark_cost(
     model: &TransformerVm,
     max_steps: usize,
@@ -2041,6 +2090,11 @@ pub fn prove_shared_transformer_staged_skeleton_stark_profiled_with_options(
     })
 }
 
+/// Prove a transformer forward-pass execution with explicit options and collect timing profile.
+///
+/// This delegates to [`prove_shared_transformer_staged_skeleton_stark_profiled_with_options`]; the staged-skeleton
+/// representation is the canonical forward-pass proof surface. The caller may use either
+/// naming family (`ForwardPass*` or `StagedSkeleton*`) interchangeably.
 pub fn prove_shared_transformer_forward_pass_stark_profiled_with_options(
     model: &TransformerVm,
     max_steps: usize,
@@ -2093,6 +2147,11 @@ pub fn verify_shared_transformer_staged_skeleton_stark(
     ))
 }
 
+/// Verify a transformer forward-pass STARK proof.
+///
+/// This delegates to [`verify_shared_transformer_staged_skeleton_stark`]; the staged-skeleton
+/// representation is the canonical forward-pass proof surface. The caller may use either
+/// naming family (`ForwardPass*` or `StagedSkeleton*`) interchangeably.
 pub fn verify_shared_transformer_forward_pass_stark(
     proof: &SharedTransformerForwardPassProof,
 ) -> Result<bool> {

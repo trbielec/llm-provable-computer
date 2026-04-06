@@ -24,8 +24,9 @@ llm-provable-computer is an implemented Rust workspace for a deterministic trans
   - `cargo clippy --all-targets --all-features -- -D warnings`
   - `cargo test --all-features`
 - Current vanilla STARK scope:
-  - supported: `NOP`, `LOADI`, `LOAD`, `STORE`, `PUSH`, `POP`, `ADD`, `ADDM`, `SUB`, `SUBM`, `MUL`, `MULM`, `CALL`, `RET`, `JMP`, `JZ`, `JNZ`, `HALT`
-  - rejected: softmax and hard-softmax proof paths, bitwise instructions, compare instructions, non-halted public claims, public claims with `carry_flag = true`
+  - supported: `NOP`, `LOADI`, `LOAD`, `STORE`, `PUSH`, `POP`, `ADD`, `ADDM`, `SUB`, `SUBM`, `MUL`, `MULM`, `AND`, `ANDM`, `OR`, `ORM`, `XOR`, `XORM`, `CALL`, `RET`, `JMP`, `JZ`, `JNZ`, `HALT`
+  - carry flag: constrained to {0, 1} via booleanity; traces with carry_flag = true are accepted but carry correctness is a free witness (not range-checked against the modular reduction)
+  - rejected: softmax and hard-softmax proof paths, compare instructions, non-halted public claims, MUL overflow
 - Current proof is transparent, not zero-knowledge: the public claim includes the program, attention mode, step count, and final state.
 </status>
 
