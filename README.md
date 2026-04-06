@@ -413,13 +413,13 @@ For large-scale transformer inference where full STARK proofs are computationall
 
 This approach provides a high-performance alternative by splitting verification into two phases:
 
-1.  **Commit**: The provider executes the program and issues a compact **Execution Receipt**. This receipt contains Merkle roots committing to the full execution trace and the model weights used, and binds the executed program and initial machine state via canonical hashes (`program_hash`, `initial_state_hash`). Current benchmark: **~1.2ms** for a single-step witness (see `cargo bench --bench commit_audit_benchmark`).
-2.  **Audit**: A user or auditor can request a proof for specific steps of the execution. The provider opens the Merkle paths for those steps and provides algebraic witnesses (using **Freivalds' algorithm**) to prove matrix-multiplication consistency. The Freivalds check is fully implemented: both the challenge and witness are produced and verified end-to-end. Current benchmark: **~864µs** audit verification for a single-step witness.
+1.  **Commit**: The provider executes the program and issues a compact **Execution Receipt**. This receipt contains Merkle roots committing to the full execution trace and the model weights used, and binds the executed program and initial machine state via canonical hashes (`program_hash`, `initial_state_hash`). Current benchmark (release, `cargo bench --bench commit_audit_benchmark`): **~1.18ms** for a single-step witness.
+2.  **Audit**: A user or auditor can request a proof for specific steps of the execution. The provider opens the Merkle paths for those steps and provides algebraic witnesses (using **Freivalds' algorithm**) to prove matrix-multiplication consistency. The Freivalds check is fully implemented: both the challenge and witness are produced and verified end-to-end. Current benchmark (same target): **~318µs** to generate an audit and **~832µs** to verify it for a single-step witness.
 
 | Feature | Vanilla STARK | Commit-and-Audit |
 | :--- | :--- | :--- |
 | **Integrity** | Cryptographic (100%) | Statistical (Audit-based) |
-| **Overhead** | High (ms to seconds) | Low (~1.2ms commit, see benchmarks) |
+| **Overhead** | High (ms to seconds) | Low (~1.18ms commit + ~318µs audit generation and ~832µs verify, see benchmarks) |
 | **Proof Size** | Large (JSON) | Tiny (Merkle Root) |
 | **Best For** | High-stakes decisions | Routine LLM inference |
 
@@ -513,6 +513,12 @@ cargo test --features full             # Everything
 cargo test --features metal-batch      # Includes Metal GPU batch runner
 cargo bench                            # Hull + STARK benchmarks
 ```
+
+## Benchmarks
+
+- `cargo bench --bench vanillastark_benchmark` runs the STARK proof fixtures described in `docs/architecture/stark-benchmarking.md`.
+- `cargo bench --bench commit_audit_benchmark` measures the optimistic verification path (release numbers above).
+- `cargo bench --bench batch_benchmark` exercises the CPU `BatchRunner`; release-mode results are roughly 325µs for 64 states, 1.04ms for 256, 3.81ms for 1,024, and 14.7ms for 4,096 parallel runs.
 
 ## Development Checks
 
