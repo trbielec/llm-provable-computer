@@ -9,9 +9,9 @@ use crate::cdmn::{
     prove_compiled_cdmn_decision_stark_direct_profiled_with_options,
     verify_cdmn_decision_stark_direct, CdmnDecisionStarkDirectCostEstimate,
     CdmnDecisionStarkDirectProof, CdmnDecisionStarkDirectProvingProfile,
-    CompiledCdmnDecisionProgram, DecisionArithmeticExpr, DecisionAvailability, DecisionBooleanExpr,
-    DecisionConstraint, DecisionFailureReason, DecisionValueRef, DecisionValueSource,
-    ReasonMetadata,
+    CompiledCdmnDecisionProgram, DecisionArithmeticExpr, DecisionAvailability,
+    DecisionAvailabilitySource, DecisionBooleanExpr, DecisionConstraint, DecisionFailureReason,
+    DecisionValueRef, DecisionValueSource, ReasonMetadata,
 };
 use crate::dmn::{DmnAssignment, DmnHitPolicy, DmnTable};
 use crate::dmn_decision::{
@@ -19,7 +19,7 @@ use crate::dmn_decision::{
     materialize_projected_inputs, ordered_rule_indexes, project_inputs, CompiledDmnDecisionProgram,
     DmnDecisionEvaluation, DmnDecisionEvaluationDetail, RuleCheck, TerminalOutcome,
 };
-use crate::error::Result;
+use crate::error::{Result, VmError};
 use crate::proof::VanillaStarkProofOptions;
 use crate::state::Word;
 
@@ -249,6 +249,7 @@ pub fn prove_compiled_dmn_decision_stark_direct_profiled_with_options(
     initial_memory: &[Word],
     options: VanillaStarkProofOptions,
 ) -> Result<CompiledDmnDecisionStarkDirectProvingReport> {
+    validate_dmn_direct_program_support(decision_program)?;
     let total_start = Instant::now();
     let detail = evaluate_compiled_dmn_decision_program_detailed(decision_program, initial_memory)?;
     let projected_inputs = project_inputs(decision_program, initial_memory)?;
@@ -280,6 +281,7 @@ pub fn estimate_compiled_dmn_decision_stark_direct_cost(
     initial_memory: &[Word],
     options: VanillaStarkProofOptions,
 ) -> Result<DmnDecisionStarkDirectCostEstimate> {
+    validate_dmn_direct_program_support(decision_program)?;
     let detail = evaluate_compiled_dmn_decision_program_detailed(decision_program, initial_memory)?;
     let selection = prepare_selection_backend(decision_program, initial_memory, &detail)?;
     Ok(DmnDecisionStarkDirectCostEstimate {
@@ -303,6 +305,7 @@ pub fn estimate_dmn_decision_stark_direct_cost(
 pub fn verify_compiled_dmn_decision_stark_direct(
     proof: &CompiledDmnDecisionStarkDirectProof,
 ) -> Result<bool> {
+    validate_dmn_direct_program_support(&proof.claim.decision_program)?;
     let initial_memory =
         materialize_projected_inputs(&proof.claim.decision_program, &proof.claim.projected_inputs)?;
     let detail = evaluate_compiled_dmn_decision_program_detailed(
@@ -330,6 +333,109 @@ pub fn verify_compiled_dmn_decision_stark_direct(
     }
 
     verify_cdmn_decision_stark_direct(&proof.selection_proof)
+}
+
+fn validate_dmn_direct_program_support(
+    decision_program: &CompiledDmnDecisionProgram,
+) -> Result<()> {
+    for rule in &decision_program.rules {
+        validate_dmn_direct_boolean_expr(rule.id, &rule.condition)?;
+    }
+    Ok(())
+}
+
+fn validate_dmn_direct_boolean_expr(rule_id: Word, expr: &DecisionBooleanExpr) -> Result<()> {
+    match expr {
+        DecisionBooleanExpr::Constant(_) => Ok(()),
+        DecisionBooleanExpr::CountAtLeast { .. } => Err(VmError::InvalidConfig(format!(
+            "DMN direct backend rule {rule_id} currently supports only scalar DMN inputs; collection count guards are not supported. Use cDMN for collection logic."
+        ))),
+        DecisionBooleanExpr::Comparison { lhs, rhs, .. } => {
+            validate_dmn_direct_arithmetic_expr(rule_id, lhs)?;
+            validate_dmn_direct_arithmetic_expr(rule_id, rhs)
+        }
+        DecisionBooleanExpr::Availability { value, .. } => {
+            validate_dmn_direct_arithmetic_expr(rule_id, value)
+        }
+        DecisionBooleanExpr::Between {
+            value,
+            lower,
+            upper,
+        } => {
+            validate_dmn_direct_arithmetic_expr(rule_id, value)?;
+            validate_dmn_direct_arithmetic_expr(rule_id, lower)?;
+            validate_dmn_direct_arithmetic_expr(rule_id, upper)
+        }
+        DecisionBooleanExpr::And(left, right) | DecisionBooleanExpr::Or(left, right) => {
+            validate_dmn_direct_boolean_expr(rule_id, left)?;
+            validate_dmn_direct_boolean_expr(rule_id, right)
+        }
+        DecisionBooleanExpr::Not(inner) => validate_dmn_direct_boolean_expr(rule_id, inner),
+        DecisionBooleanExpr::Quantified { .. } => Err(VmError::InvalidConfig(format!(
+            "DMN direct backend rule {rule_id} currently supports only scalar DMN inputs; quantified rule conditions over collections are not supported. Use cDMN for collection logic."
+        ))),
+    }
+}
+
+fn validate_dmn_direct_arithmetic_expr(rule_id: Word, expr: &DecisionArithmeticExpr) -> Result<()> {
+    match expr {
+        DecisionArithmeticExpr::Number(_) => Ok(()),
+        DecisionArithmeticExpr::Value(value_ref) => {
+            validate_dmn_direct_value_ref(rule_id, value_ref)
+        }
+        DecisionArithmeticExpr::Binary { left, right, .. } => {
+            validate_dmn_direct_arithmetic_expr(rule_id, left)?;
+            validate_dmn_direct_arithmetic_expr(rule_id, right)
+        }
+    }
+}
+
+fn validate_dmn_direct_value_ref(rule_id: Word, value_ref: &DecisionValueRef) -> Result<()> {
+    validate_dmn_direct_value_source(rule_id, &value_ref.source)?;
+    validate_dmn_direct_availability(rule_id, &value_ref.availability)
+}
+
+fn validate_dmn_direct_value_source(rule_id: Word, source: &DecisionValueSource) -> Result<()> {
+    match source {
+        DecisionValueSource::InputCell(_) | DecisionValueSource::DefinitionValue(_) => Ok(()),
+        DecisionValueSource::BoundField { .. } => Err(VmError::InvalidConfig(format!(
+            "DMN direct backend rule {rule_id} currently supports only scalar DMN inputs; bound collection fields are not supported. Use cDMN for collection logic."
+        ))),
+    }
+}
+
+fn validate_dmn_direct_availability(
+    rule_id: Word,
+    availability: &DecisionAvailability,
+) -> Result<()> {
+    match availability {
+        DecisionAvailability::Always => Ok(()),
+        DecisionAvailability::Flags { presence, unknown } => {
+            if let Some(source) = presence {
+                validate_dmn_direct_availability_source(rule_id, source)?;
+            }
+            if let Some(source) = unknown {
+                validate_dmn_direct_availability_source(rule_id, source)?;
+            }
+            Ok(())
+        }
+        DecisionAvailability::Status(source) => {
+            validate_dmn_direct_availability_source(rule_id, source)
+        }
+    }
+}
+
+fn validate_dmn_direct_availability_source(
+    rule_id: Word,
+    source: &DecisionAvailabilitySource,
+) -> Result<()> {
+    match source {
+        DecisionAvailabilitySource::InputCell(_)
+        | DecisionAvailabilitySource::DefinitionStatus(_) => Ok(()),
+        DecisionAvailabilitySource::BoundField { .. } => Err(VmError::InvalidConfig(format!(
+            "DMN direct backend rule {rule_id} currently supports only scalar DMN inputs; bound availability fields are not supported. Use cDMN for collection logic."
+        ))),
+    }
 }
 
 fn build_compiled_claim(
@@ -892,4 +998,107 @@ fn selection_reason_seed(used: &HashSet<Word>) -> Word {
 
 fn elapsed_micros(start: Instant) -> u64 {
     start.elapsed().as_micros().min(u128::from(u64::MAX)) as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dmn::DmnReasonMetadata;
+    use crate::error::VmError;
+
+    fn reason(code: Word, label: &str) -> DmnReasonMetadata {
+        DmnReasonMetadata {
+            code,
+            label: label.to_string(),
+            description: label.to_string(),
+        }
+    }
+
+    fn single_rule_program(condition: DecisionBooleanExpr) -> CompiledDmnDecisionProgram {
+        CompiledDmnDecisionProgram {
+            name: "DMN direct subset".to_string(),
+            hit_policy: DmnHitPolicy::First,
+            collect_operator: None,
+            outputs: vec!["decision".to_string()],
+            rules: vec![crate::dmn_decision::CompiledDmnDecisionRule {
+                id: 7,
+                description: "single rule".to_string(),
+                priority: None,
+                condition,
+                assignments: vec![DmnAssignment {
+                    output: "decision".to_string(),
+                    value: 1,
+                }],
+                reason: reason(7, "matched"),
+            }],
+            default_rule: None,
+            input_cells: vec![0],
+            reasons: vec![reason(7, "matched")],
+            system_reasons: crate::dmn_decision::DmnSystemReasonSet {
+                no_match: reason(100, "no_match"),
+                insufficient_data: reason(101, "insufficient_data"),
+                hit_policy_violation: reason(102, "hit_policy_violation"),
+            },
+        }
+    }
+
+    #[test]
+    fn compiled_dmn_direct_rejects_bound_collection_fields() {
+        let program = single_rule_program(DecisionBooleanExpr::Comparison {
+            lhs: DecisionArithmeticExpr::Value(DecisionValueRef {
+                source: DecisionValueSource::BoundField {
+                    binding: 0,
+                    offset: 0,
+                },
+                availability: DecisionAvailability::Always,
+            }),
+            op: ComparisonOp::Eq,
+            rhs: DecisionArithmeticExpr::Number(1),
+        });
+
+        let err = estimate_compiled_dmn_decision_stark_direct_cost(
+            &program,
+            &[0],
+            VanillaStarkProofOptions::default(),
+        )
+        .unwrap_err();
+        match err {
+            VmError::InvalidConfig(message) => {
+                assert!(message.contains("bound collection fields"));
+                assert!(message.contains("Use cDMN"));
+            }
+            other => panic!("expected invalid-config error, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compiled_dmn_direct_rejects_bound_availability_fields() {
+        let program = single_rule_program(DecisionBooleanExpr::Comparison {
+            lhs: DecisionArithmeticExpr::Value(DecisionValueRef {
+                source: DecisionValueSource::InputCell(0),
+                availability: DecisionAvailability::Status(
+                    DecisionAvailabilitySource::BoundField {
+                        binding: 0,
+                        offset: 1,
+                    },
+                ),
+            }),
+            op: ComparisonOp::Eq,
+            rhs: DecisionArithmeticExpr::Number(1),
+        });
+
+        let err = estimate_compiled_dmn_decision_stark_direct_cost(
+            &program,
+            &[0],
+            VanillaStarkProofOptions::default(),
+        )
+        .unwrap_err();
+        match err {
+            VmError::InvalidConfig(message) => {
+                assert!(message.contains("bound availability fields"));
+                assert!(message.contains("Use cDMN"));
+            }
+            other => panic!("expected invalid-config error, found {other:?}"),
+        }
+    }
 }

@@ -609,6 +609,167 @@ pub fn verify_cdmn_decision_stark_direct(proof: &CdmnDecisionStarkDirectProof) -
     ))
 }
 
+fn validate_direct_stark_program_support(program: &CompiledCdmnDecisionProgram) -> Result<()> {
+    for constraint in &program.constraints {
+        validate_direct_stark_boolean_expr(&constraint.id, &constraint.expression, None)?;
+    }
+    Ok(())
+}
+
+fn validate_direct_stark_boolean_expr(
+    constraint_id: &str,
+    expr: &DecisionBooleanExpr,
+    quantified_binding: Option<&DecisionQuantifiedCollection>,
+) -> Result<()> {
+    match expr {
+        DecisionBooleanExpr::Constant(_) => Ok(()),
+        DecisionBooleanExpr::CountAtLeast { .. } => {
+            if quantified_binding.is_some() {
+                Err(VmError::UnsupportedProof(format!(
+                    "direct cDMN STARK constraint `{constraint_id}` does not support nested count guards inside quantified predicates"
+                )))
+            } else {
+                Ok(())
+            }
+        }
+        DecisionBooleanExpr::Comparison { lhs, rhs, .. } => {
+            validate_direct_stark_arithmetic_expr(constraint_id, lhs, quantified_binding)?;
+            validate_direct_stark_arithmetic_expr(constraint_id, rhs, quantified_binding)
+        }
+        DecisionBooleanExpr::Availability { value, .. } => {
+            validate_direct_stark_arithmetic_expr(constraint_id, value, quantified_binding)
+        }
+        DecisionBooleanExpr::Between {
+            value,
+            lower,
+            upper,
+        } => {
+            validate_direct_stark_arithmetic_expr(constraint_id, value, quantified_binding)?;
+            validate_direct_stark_arithmetic_expr(constraint_id, lower, quantified_binding)?;
+            validate_direct_stark_arithmetic_expr(constraint_id, upper, quantified_binding)
+        }
+        DecisionBooleanExpr::And(left, right) | DecisionBooleanExpr::Or(left, right) => {
+            validate_direct_stark_boolean_expr(constraint_id, left, quantified_binding)?;
+            validate_direct_stark_boolean_expr(constraint_id, right, quantified_binding)
+        }
+        DecisionBooleanExpr::Not(inner) => {
+            validate_direct_stark_boolean_expr(constraint_id, inner, quantified_binding)
+        }
+        DecisionBooleanExpr::Quantified {
+            collection,
+            predicate,
+            ..
+        } => {
+            if quantified_binding.is_some() {
+                return Err(VmError::UnsupportedProof(format!(
+                    "direct cDMN STARK constraint `{constraint_id}` currently supports only one quantified layer per predicate; nested quantified predicates are not supported"
+                )));
+            }
+            validate_direct_stark_boolean_expr(constraint_id, predicate, Some(collection))
+        }
+    }
+}
+
+fn validate_direct_stark_arithmetic_expr(
+    constraint_id: &str,
+    expr: &DecisionArithmeticExpr,
+    quantified_binding: Option<&DecisionQuantifiedCollection>,
+) -> Result<()> {
+    match expr {
+        DecisionArithmeticExpr::Number(_) => Ok(()),
+        DecisionArithmeticExpr::Value(value_ref) => {
+            validate_direct_stark_value_ref(constraint_id, value_ref, quantified_binding)
+        }
+        DecisionArithmeticExpr::Binary { left, right, .. } => {
+            validate_direct_stark_arithmetic_expr(constraint_id, left, quantified_binding)?;
+            validate_direct_stark_arithmetic_expr(constraint_id, right, quantified_binding)
+        }
+    }
+}
+
+fn validate_direct_stark_value_ref(
+    constraint_id: &str,
+    value_ref: &DecisionValueRef,
+    quantified_binding: Option<&DecisionQuantifiedCollection>,
+) -> Result<()> {
+    validate_direct_stark_value_source(constraint_id, &value_ref.source, quantified_binding)?;
+    validate_direct_stark_availability(constraint_id, &value_ref.availability, quantified_binding)
+}
+
+fn validate_direct_stark_value_source(
+    constraint_id: &str,
+    source: &DecisionValueSource,
+    quantified_binding: Option<&DecisionQuantifiedCollection>,
+) -> Result<()> {
+    match source {
+        DecisionValueSource::InputCell(_) | DecisionValueSource::DefinitionValue(_) => Ok(()),
+        DecisionValueSource::BoundField { binding, .. } => {
+            validate_direct_stark_bound_binding(constraint_id, *binding, quantified_binding)
+        }
+    }
+}
+
+fn validate_direct_stark_availability(
+    constraint_id: &str,
+    availability: &DecisionAvailability,
+    quantified_binding: Option<&DecisionQuantifiedCollection>,
+) -> Result<()> {
+    match availability {
+        DecisionAvailability::Always => Ok(()),
+        DecisionAvailability::Flags { presence, unknown } => {
+            if let Some(source) = presence {
+                validate_direct_stark_availability_source(
+                    constraint_id,
+                    source,
+                    quantified_binding,
+                )?;
+            }
+            if let Some(source) = unknown {
+                validate_direct_stark_availability_source(
+                    constraint_id,
+                    source,
+                    quantified_binding,
+                )?;
+            }
+            Ok(())
+        }
+        DecisionAvailability::Status(source) => {
+            validate_direct_stark_availability_source(constraint_id, source, quantified_binding)
+        }
+    }
+}
+
+fn validate_direct_stark_availability_source(
+    constraint_id: &str,
+    source: &DecisionAvailabilitySource,
+    quantified_binding: Option<&DecisionQuantifiedCollection>,
+) -> Result<()> {
+    match source {
+        DecisionAvailabilitySource::InputCell(_)
+        | DecisionAvailabilitySource::DefinitionStatus(_) => Ok(()),
+        DecisionAvailabilitySource::BoundField { binding, .. } => {
+            validate_direct_stark_bound_binding(constraint_id, *binding, quantified_binding)
+        }
+    }
+}
+
+fn validate_direct_stark_bound_binding(
+    constraint_id: &str,
+    binding: usize,
+    quantified_binding: Option<&DecisionQuantifiedCollection>,
+) -> Result<()> {
+    match quantified_binding {
+        Some(collection) if collection.binding == binding => Ok(()),
+        Some(collection) => Err(VmError::UnsupportedProof(format!(
+            "direct cDMN STARK constraint `{constraint_id}` currently supports a single quantified binding per predicate; `{}` also referenced binding {binding}",
+            collection.name
+        ))),
+        None => Err(VmError::InvalidConfig(format!(
+            "direct cDMN STARK constraint `{constraint_id}` references bound collection data outside a quantified predicate"
+        ))),
+    }
+}
+
 struct DirectDecisionCircuitBuilder {
     circuit: DirectDecisionCircuit,
     arithmetic_cache: HashMap<DecisionArithmeticExpr, ArithmeticSource>,
@@ -619,6 +780,8 @@ struct DirectDecisionCircuitBuilder {
 
 impl DirectDecisionCircuitBuilder {
     fn build(program: &CompiledCdmnDecisionProgram) -> Result<DirectDecisionCircuit> {
+        validate_direct_stark_program_support(program)?;
+
         let mut builder = Self {
             circuit: DirectDecisionCircuit {
                 always_available_register: 0,
@@ -1862,7 +2025,7 @@ impl DirectDecisionCircuit {
             })?;
             if value != 0 && value != 1 {
                 return Err(VmError::UnsupportedProof(format!(
-                    "direct cDMN STARK currently requires boolean availability flags; cell {address} had value {value}"
+                    "direct cDMN STARK currently requires boolean presence/unknown availability flags in {{0,1}}; cell {address} had value {value}"
                 )));
             }
         }
@@ -1874,7 +2037,7 @@ impl DirectDecisionCircuit {
             })?;
             if !(STATUS_AVAILABLE..=STATUS_UNKNOWN).contains(&value) {
                 return Err(VmError::UnsupportedProof(format!(
-                    "direct cDMN STARK currently requires status-coded inputs in {{0,1,2}}; cell {address} had value {value}"
+                    "direct cDMN STARK currently requires status-coded availability inputs in {{0,1,2}}; cell {address} had value {value}"
                 )));
             }
         }
@@ -5276,8 +5439,9 @@ mod tests {
     use super::*;
     use crate::cdmn::{
         compile_cdmn_table_to_decision_program, CdmnTable, Collection, CollectionField, Constraint,
-        Variable,
+        DecisionConstraint, Variable,
     };
+    use crate::error::VmError;
 
     #[test]
     fn direct_cdmn_proof_round_trips_small_policy() {
@@ -5757,6 +5921,101 @@ mod tests {
                 ..
             } => {}
             other => panic!("expected compact quantified comparison, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn direct_builder_rejects_nested_quantified_predicates() {
+        let program = CompiledCdmnDecisionProgram {
+            name: "Nested Quantified".to_string(),
+            definitions: Vec::new(),
+            constraints: vec![DecisionConstraint {
+                id: "Q_nested".to_string(),
+                description: "nested quantified predicates are unsupported".to_string(),
+                bound_checks: Vec::new(),
+                expression: DecisionBooleanExpr::Quantified {
+                    kind: QuantifierKind::ForAll,
+                    collection: DecisionQuantifiedCollection {
+                        binding: 0,
+                        name: "medications".to_string(),
+                        count_memory: 0,
+                        base_memory: 1,
+                        stride: 1,
+                        max_items: 1,
+                    },
+                    predicate: Box::new(DecisionBooleanExpr::Quantified {
+                        kind: QuantifierKind::Exists,
+                        collection: DecisionQuantifiedCollection {
+                            binding: 1,
+                            name: "overrides".to_string(),
+                            count_memory: 2,
+                            base_memory: 3,
+                            stride: 1,
+                            max_items: 1,
+                        },
+                        predicate: Box::new(DecisionBooleanExpr::Constant(true)),
+                    }),
+                },
+                reason: DecisionFailureReason {
+                    code: 1,
+                    label: "nested_quantifier".to_string(),
+                    description: "nested quantifier".to_string(),
+                },
+                insufficient_data_reason: DecisionFailureReason {
+                    code: 2,
+                    label: "nested_quantifier_insufficient".to_string(),
+                    description: "nested quantifier insufficient".to_string(),
+                },
+            }],
+            input_cells: vec![0, 1, 2, 3],
+            reasons: Vec::new(),
+        };
+
+        let err = estimate_compiled_cdmn_decision_stark_direct_cost(
+            &program,
+            VanillaStarkProofOptions::default(),
+        )
+        .unwrap_err();
+        match err {
+            VmError::UnsupportedProof(message) => {
+                assert!(message.contains("nested quantified predicates"));
+                assert!(message.contains("Q_nested"));
+            }
+            other => panic!("expected unsupported-proof error, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn direct_cdmn_proof_rejects_non_boolean_availability_flags() {
+        let table = CdmnTable {
+            name: "Availability Flag Domain".to_string(),
+            table_type: "cDMN".to_string(),
+            variables: vec![Variable {
+                name: "dose".to_string(),
+                memory: 0,
+                presence_memory: Some(1),
+                unknown_memory: None,
+            }],
+            collections: vec![],
+            definitions: vec![],
+            constraints: vec![Constraint {
+                id: "A1".to_string(),
+                description: "dose must be present and positive".to_string(),
+                logic: "dose >= 1".to_string(),
+                reason_code: Some(41),
+                reason_label: Some("dose_invalid".to_string()),
+                insufficient_data_reason_code: None,
+                insufficient_data_reason_label: None,
+            }],
+        };
+
+        let err = prove_cdmn_decision_stark_direct(&table, &[5, 2]).unwrap_err();
+        match err {
+            VmError::UnsupportedProof(message) => {
+                assert!(message.contains("boolean presence/unknown availability flags"));
+                assert!(message.contains("cell 1"));
+            }
+            other => panic!("expected unsupported-proof error, found {other:?}"),
         }
     }
 

@@ -45,4 +45,11 @@ These examples only use the semantics that are implemented today:
 - explicit reason codes / labels
 - explicit insufficient-data reasons
 
+Current direct cDMN STARK quantified subset:
+
+- one quantified layer per predicate
+- bound-field references must stay within that predicate's single quantified binding
+- presence / unknown flags must be boolean `0` / `1`
+- status-coded availability inputs must stay in `{0,1,2}`
+
 They intentionally avoid temporal logic, units, null propagation rules, and other parts of the broader cDMN/DMN roadmap that are not implemented yet.
