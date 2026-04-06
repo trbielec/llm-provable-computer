@@ -1,0 +1,82 @@
+; Loan approval decision — three-condition short-circuit evaluation.
+;
+; Evaluates three independent underwriting criteria in order.
+; The first failing criterion causes an immediate denial (short-circuit),
+; which produces variable execution depth across the input space and makes
+; this program a realistic stream-compaction benchmark.
+;
+; Input (swept):
+;   ACC = credit_score  (0..850; exhaustive 2^10 sweep = 1024 inputs covers full range)
+;
+; Fixed parameters (from .init, change to model different applicants):
+;   MEM[0] = annual_income      (default: 75,000)
+;   MEM[1] = annual_debt        (default: 24,000  →  DTI = 32%, well under 43%)
+;
+; Scratch (written by the program):
+;   MEM[2] = saved credit_score
+;   MEM[3] = income * 43        (for DTI check)
+;   MEM[4] = annual_debt * 100  (for DTI check)
+;
+; Output:
+;   ACC = 1  →  approved   (all three criteria met)
+;   ACC = 0  →  denied     (at least one criterion failed)
+;
+; Criteria:
+;   1. credit_score  ≥ 620           (prime/near-prime threshold)
+;   2. annual_income ≥ 50,000        (minimum income floor)
+;   3. annual_debt / annual_income   < 43%
+;        encoded as:  annual_debt * 100  <  annual_income * 43
+;
+; Sign-bit comparison technique:
+;   For values in a bounded range, (a - b) is negative iff a < b.
+;   ANDing with i64::MIN (= -9223372036854775808 = 0x8000_0000_0000_0000)
+;   isolates bit 63.  JNZ then branches when the result is negative.
+;
+; Execution depth by denial path:
+;    ~6 steps  — denied at credit check  (credit_score < 620)
+;   ~10 steps  — denied at income check  (income < 50,000)
+;   ~21 steps  — denied at DTI check     (debt/income ≥ 43%)
+;   ~21 steps  — approved                (all checks pass)
+
+.memory 5
+.init 0 75000    ; annual_income
+.init 1 24000    ; annual_debt
+
+      STORE 2          ; MEM[2] = credit_score  (preserve input for later use)
+
+      ; ── Criterion 1: credit_score ≥ 620 ──────────────────────────────
+      SUB   620        ; credit_score − 620  (negative → too low)
+      AND   -9223372036854775808
+      JNZ   deny       ; sign bit set → credit_score < 620
+
+      ; ── Criterion 2: annual_income ≥ 50,000 ──────────────────────────
+      LOAD  0
+      SUB   50000      ; income − 50,000  (negative → below floor)
+      AND   -9223372036854775808
+      JNZ   deny
+
+      ; ── Criterion 3: debt-to-income ratio < 43% ──────────────────────
+      ; annual_debt / annual_income < 0.43
+      ;   ↔  annual_debt × 100  <  annual_income × 43
+      ;   ↔  annual_income × 43 − annual_debt × 100  >  0
+      LOAD  0
+      MUL   43
+      STORE 3          ; MEM[3] = income × 43
+
+      LOAD  1
+      MUL   100
+      STORE 4          ; MEM[4] = debt × 100
+
+      LOAD  3
+      SUBM  4          ; income×43 − debt×100
+      JZ    deny       ; exactly at 43.0% → deny (strict inequality)
+      AND   -9223372036854775808
+      JNZ   deny       ; negative → DTI > 43% → deny
+
+      ; ── All criteria met ─────────────────────────────────────────────
+      LOADI 1
+      HALT
+
+deny:
+      LOADI 0
+      HALT

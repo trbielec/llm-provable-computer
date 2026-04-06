@@ -43,6 +43,30 @@ impl NativeInterpreter {
         }
     }
 
+    /// Create an interpreter seeded with an explicit initial [`MachineState`].
+    ///
+    /// The state's `memory` slice initialises [`AddressedMemory`]; its length
+    /// must equal the program's memory size.  Use this to run the native
+    /// interpreter from the same starting point as a batch runner.
+    pub fn new_with_state(
+        program: Program,
+        attention_mode: Attention2DMode,
+        initial_state: MachineState,
+        max_steps: usize,
+    ) -> Self {
+        let memory = AddressedMemory::from_initial(&initial_state.memory);
+        Self {
+            program,
+            attention_mode,
+            memory,
+            state: initial_state.clone(),
+            trace: vec![initial_state],
+            events: Vec::new(),
+            step_count: 0,
+            max_steps,
+        }
+    }
+
     pub fn step(&mut self) -> Result<&MachineState> {
         if execution_complete(&self.state, self.step_count, self.max_steps) {
             return Ok(&self.state);

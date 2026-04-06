@@ -1,0 +1,11 @@
+; Returns ACC * 2.
+;
+; Input:  initial ACC value (set by the batch runner or caller)
+; Output: final ACC = 2 * input
+;
+; Works correctly for all inputs whose double fits in i64.
+.memory 2
+
+STORE 0      ; MEM[0] = input
+ADDM 0       ; ACC = ACC + MEM[0] = 2 * input
+HALT

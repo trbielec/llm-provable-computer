@@ -1,0 +1,51 @@
+; Computes the nth Fibonacci number where n = initial ACC.
+;
+; fib(0)=0  fib(1)=1  fib(2)=1  fib(3)=2  fib(5)=5  fib(10)=55
+; fib(20)=6765  fib(30)=832040  fib(46)=1836311903  (last that fits in i32)
+;
+; Execution depth scales linearly with n: ~12*n + 4 steps.
+; This makes it a strong showcase for stream compaction — runs with small
+; n halt and are retired early, shrinking the active batch proportionally.
+;
+; Memory:
+;   MEM[0] = a  (Fibonacci[k-1], starts 0)
+;   MEM[1] = b  (Fibonacci[k],   starts 1)
+;   MEM[2] = counter (counts down from n to 0)
+;   MEM[3] = temp
+;
+; Input:  ACC = n  (≥ 0)
+; Output: ACC = fib(n)
+
+.memory 4
+
+      JZ    base     ; fib(0) = 0, handled separately
+      STORE 2        ; MEM[2] = n
+
+      LOADI 1
+      STORE 1        ; MEM[1] = 1  (b = 1; a = 0 already from .memory)
+
+loop:
+      LOAD  2
+      SUB   1
+      STORE 2        ; counter--
+      JZ    done     ; counter hit 0: result is current b
+
+      LOAD  0
+      ADDM  1
+      STORE 3        ; temp = a + b
+
+      LOAD  1
+      STORE 0        ; a = b
+
+      LOAD  3
+      STORE 1        ; b = temp
+
+      JMP   loop
+
+done:
+      LOAD  1        ; return b = fib(n)
+      HALT
+
+base:
+      LOADI 0        ; fib(0) = 0
+      HALT
