@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use llm_provable_computer::commit_and_audit::{
     audit_execution, commit_execution, verify_audit, AuditRequest, AuditTarget,
 };
@@ -75,6 +75,7 @@ fn bench_commit_and_audit(c: &mut Criterion) {
     let request = AuditRequest {
         target: AuditTarget::Steps(vec![3]),
         challenge: None,
+        approximate_config: None,
     };
 
     group.bench_function("audit_generate", |b| {
@@ -83,6 +84,7 @@ fn bench_commit_and_audit(c: &mut Criterion) {
                 black_box(&vm),
                 black_box(&m_trace),
                 black_box(&w_commitment),
+                black_box(&witness),
                 black_box(&staged_trace),
                 black_box(&request),
             )
@@ -90,7 +92,8 @@ fn bench_commit_and_audit(c: &mut Criterion) {
         })
     });
 
-    let response = audit_execution(&vm, &m_trace, &w_commitment, &staged_trace, &request).unwrap();
+    let response =
+        audit_execution(&vm, &m_trace, &w_commitment, &witness, &staged_trace, &request).unwrap();
 
     group.bench_function("audit_verify", |b| {
         b.iter(|| verify_audit(black_box(&receipt), black_box(&response), None))

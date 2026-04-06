@@ -395,13 +395,13 @@ For large-scale transformer inference where full STARK proofs are computationall
 
 This approach provides a high-performance alternative by splitting verification into two phases:
 
-1.  **Commit**: The provider executes the program and issues a compact **Execution Receipt**. This receipt contains Merkle roots committing to the full execution trace and the model weights used. This takes **~12µs**, making it suitable for real-time serving.
-2.  **Audit**: A user or auditor can request a proof for specific steps of the execution. The provider opens the Merkle paths for those steps and provides algebraic witnesses (using **Freivalds' algorithm**) to prove matrix-multiplication consistency. Verification takes **~1µs**, allowing for massive-scale statistical auditing to "keep providers honest."
+1.  **Commit**: The provider executes the program and issues a compact **Execution Receipt**. This receipt contains Merkle roots committing to the full execution trace and the model weights used. Current benchmark: **~1.2ms** for a single-step witness (see `cargo bench --bench commit_audit_benchmark`).
+2.  **Audit**: A user or auditor can request a proof for specific steps of the execution. The provider opens the Merkle paths for those steps and provides algebraic witnesses (using **Freivalds' algorithm**) to prove matrix-multiplication consistency. Current benchmark: **~864µs** audit verification for a single-step witness.
 
 | Feature | Vanilla STARK | Commit-and-Audit |
 | :--- | :--- | :--- |
 | **Integrity** | Cryptographic (100%) | Statistical (Audit-based) |
-| **Overhead** | High (ms to seconds) | Negligible (~12µs) |
+| **Overhead** | High (ms to seconds) | Low (~1.2ms commit, see benchmarks) |
 | **Proof Size** | Large (JSON) | Tiny (Merkle Root) |
 | **Best For** | High-stakes decisions | Routine LLM inference |
 
