@@ -399,7 +399,7 @@ The vanilla STARK prover operates over **F_p** where p = 1 + 407 &middot; 2^119 
 
 The AIR encodes each supported instruction as polynomial transition constraints over the trace columns `(PC, ACC, SP, zero_flag, carry_flag, halted, MEM[0..n])`. The boundary constraints pin the initial and final machine states.
 
-**Supported instruction families:** `NOP`, `LOADI`, `LOAD`, `STORE`, `PUSH`, `POP`, `ADD`/`ADDM`, `SUB`/`SUBM`, `MUL`/`MULM`, `AND`/`ANDM`, `OR`/`ORM`, `XOR`/`XORM`, `CALL`, `RET`, `JMP`, `JZ`, `JNZ`, `HALT`. Carry-bearing traces (overflow, subtraction borrow) are fully constrained. Executions must halt. `CMP`/`CMPM` and non-`average-hard` attention modes are not yet supported.
+**Supported instruction families:** `NOP`, `LOADI`, `LOAD`, `STORE`, `PUSH`, `POP`, `ADD`/`ADDM`, `SUB`/`SUBM`, `MUL`/`MULM`, `AND`/`ANDM`, `OR`/`ORM`, `XOR`/`XORM`, `CALL`, `RET`, `JMP`, `JZ`, `JNZ`, `JS`, `JNS`, `HALT`. Carry-bearing traces (overflow, subtraction borrow) are fully constrained. Executions must halt. `CMP`/`CMPM` and non-`average-hard` attention modes are not yet supported.
 
 ```bash
 # Prove

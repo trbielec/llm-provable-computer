@@ -31,7 +31,7 @@ Current roadmap: `docs/roadmaps/current-roadmap.md`
   - `cargo test --all-features`
   - `cargo test --features metal-batch`
 - Current vanilla STARK scope:
-  - supported: `NOP`, `LOADI`, `LOAD`, `STORE`, `PUSH`, `POP`, `ADD`, `ADDM`, `SUB`, `SUBM`, `MUL`, `MULM`, `AND`, `ANDM`, `OR`, `ORM`, `XOR`, `XORM`, `CALL`, `RET`, `JMP`, `JZ`, `JNZ`, `HALT`
+  - supported: `NOP`, `LOADI`, `LOAD`, `STORE`, `PUSH`, `POP`, `ADD`, `ADDM`, `SUB`, `SUBM`, `MUL`, `MULM`, `AND`, `ANDM`, `OR`, `ORM`, `XOR`, `XORM`, `CALL`, `RET`, `JMP`, `JZ`, `JNZ`, `JS`, `JNS`, `HALT`
   - carry flag: fully constrained; carry-bearing traces (overflow, subtraction borrow) are accepted and carry correctness is verified by the AIR (not a free witness)
   - rejected: softmax and hard-softmax proof paths, `CMP`/`CMPM` compare instructions, non-halted executions
 - Commit-and-Audit: receipts bind `program_hash` and `initial_state_hash`; Freivalds algebraic check is fully implemented (not a stub)
@@ -62,7 +62,20 @@ src/
   model.rs              # TransformerVm and compiled transition logic
   runtime.rs            # Transformer execution loop
   state.rs              # MachineState and token encoding
-  proof.rs              # Execution-proof plumbing and AIR wiring
+  proof.rs              # Execution-proof plumbing and AIR wiring (classic native-trace STARK)
+  transformer_stark.rs  # Shared transformer STARK prover and verifier
+  transformer_trace.rs  # Shared transformer trace builder and validator
+  merkle_trace.rs       # Merkle tree commitment over transformer trace rows
+  commit_and_audit.rs   # Commit-and-audit protocol (Merkle commit + Freivalds audit)
+  approximate.rs        # Numerical precision helpers and audit numeric scale
+  freivalds.rs          # Freivalds algebraic matrix-multiplication witness check
+  poet_proof.rs         # Reduced local transformer-style forward-pass proof
+  dmn.rs                # DMN parsing, IR, and rule compilation
+  dmn_ir.rs             # DMN IR types (boolean and numeric rule expressions)
+  dmn_backend_tvm.rs    # DMN→TVM compilation backend
+  dmn_decision.rs       # Direct decision proof types and hash binding
+  dmn_direct.rs         # Direct DMN STARK prover
+  cdmn/                 # cDMN parser, schema, IR, proof backend, and STARK compat
   verification.rs       # Lockstep engine comparison
   tui.rs                # ratatui execution viewer
   vanillastark/         # Field, polynomial, Merkle, FRI, STARK internals

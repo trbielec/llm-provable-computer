@@ -137,7 +137,7 @@ cargo test --release --test transformer_stark -- --include-ignored
 ```bash
 cargo bench --bench commit_audit_benchmark
 cargo bench --bench batch_benchmark
-cargo bench --bench vanillastark_benchmark -- policy_proofs
+cargo bench --bench vanillastark_benchmark -- stark
 ```
 
 ### Documentation baseline

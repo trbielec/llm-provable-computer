@@ -19,9 +19,20 @@ The vanilla STARK path proves:
 
 This is implemented in `src/proof.rs`, where `prove_execution_stark()` reconstructs a `NativeInterpreter`, runs it, and proves the resulting trace.
 
-## What Is Cross-Checked Instead
+## Shared Transformer STARK Path
 
-The transformer-shaped runtime is not yet directly proved by the STARK.
+In addition to the classic native-trace path, the repository contains a second STARK path that directly proves the shared `TransformerVm` forward pass:
+
+- `prove_shared_transformer_staged_skeleton_stark()` — proves the staged skeleton trace of the shared transformer execution
+- `prove_shared_transformer_forward_pass_stark()` — proves the full staged shared forward pass
+
+Both are implemented in `src/transformer_stark.rs`. This path requires the `average-hard` exact-domain attention mode and is tested in `tests/transformer_stark.rs`.
+
+The transformer trace is built by `src/transformer_trace.rs` and validated by `validate_shared_transformer_staged_trace()` before proving.
+
+## What Is Cross-Checked Instead (classic path)
+
+On the classic VM STARK path, the transformer-shaped runtime is not directly proved.
 
 Instead, it is checked against the same semantics through lockstep verification:
 
@@ -37,16 +48,14 @@ Today the system gives you:
 
 1. a deterministic compiled transformer runtime,
 2. a semantic oracle for the ISA,
-3. a proof of supported ISA execution,
-4. cross-engine checks that the transformer runtime matches that ISA semantics.
+3. a classic STARK proof of supported ISA execution (native trace),
+4. a shared transformer STARK proof that directly proves the `average-hard` forward pass,
+5. cross-engine checks that all runtimes match the ISA semantics.
 
-So the precise claim is:
+The precise claims are:
 
-- "the supported VM execution is proved, and the transformer backend can be checked against it"
-
-not:
-
-- "the transformer forward pass itself is currently what the STARK proves"
+- "the supported VM execution is proved via the native ISA trace"
+- "the shared `TransformerVm` forward pass is also directly provable for the `average-hard` exact-domain path"
 
 ## Why This Still Matters
 
