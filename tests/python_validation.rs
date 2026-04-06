@@ -184,6 +184,7 @@ fn python_validator_matches_native_trace_for_shipped_programs() {
                 num_layers: 2,
                 attention_mode: llm_provable_computer::Attention2DMode::HardSoftmax {
                     temperature: 10.0,
+                    query: [1.0, 0.0],
                 },
                 ..TransformerVmConfig::default()
             },

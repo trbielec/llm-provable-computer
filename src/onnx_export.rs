@@ -15,6 +15,7 @@ use crate::model::{
     CompiledInstruction, FeedForwardWeights, MemoryRead, Scalar, TransformerVm, TransitionControls,
     INPUT_DIM, OUTPUT_DIM,
 };
+use crate::state::{Word, WORD_BITS};
 
 pub const ONNX_IR_VERSION: i64 = 9;
 pub const ONNX_OPSET_VERSION: i64 = 19;
@@ -214,19 +215,13 @@ fn export_instruction_onnx(
 
     graph
         .initializer
-        .push(int64_tensor("const_modulus", &[1, 1], &[1i64 << 16]));
-    graph
-        .initializer
-        .push(int64_tensor("const_zero_i64", &[1, 1], &[0]));
-    graph
-        .initializer
-        .push(int64_tensor("const_min_i64", &[1, 1], &[i16::MIN as i64]));
-    graph
-        .initializer
-        .push(int64_tensor("const_max_i64", &[1, 1], &[i16::MAX as i64]));
-    graph
-        .initializer
         .push(float_tensor("const_zero_f32", &[1, 1], &[0.0]));
+    graph
+        .initializer
+        .push(float_tensor("const_min_f32", &[1, 1], &[Word::MIN as f32]));
+    graph
+        .initializer
+        .push(float_tensor("const_max_f32", &[1, 1], &[Word::MAX as f32]));
     graph
         .initializer
         .push(float_tensor("const_threshold", &[1, 1], &[0.5]));
@@ -305,16 +300,23 @@ fn export_instruction_onnx(
         &[int_attribute("to", tensor_proto::DataType::INT64 as i64)],
     ));
     graph.node.push(node(
-        "mod_wrapped_acc",
-        "Mod",
-        &["raw_acc_i64", "const_modulus"],
-        &["wrapped_acc_mod"],
+        "round_input_acc",
+        "Round",
+        &["input_acc"],
+        &["input_acc_rounded"],
         &[],
+    ));
+    graph.node.push(node(
+        "cast_input_acc_i64",
+        "Cast",
+        &["input_acc_rounded"],
+        &["input_acc_i64"],
+        &[int_attribute("to", tensor_proto::DataType::INT64 as i64)],
     ));
     graph.node.push(node(
         "result_zero_equal",
         "Equal",
-        &["wrapped_acc_mod", "const_zero_i64"],
+        &["raw_acc_rounded", "const_zero_f32"],
         &["result_zero_bool"],
         &[],
     ));
@@ -329,14 +331,14 @@ fn export_instruction_onnx(
     graph.node.push(node(
         "overflow_low",
         "Less",
-        &["raw_acc_i64", "const_min_i64"],
+        &["raw_acc_rounded", "const_min_f32"],
         &["overflow_low_bool"],
         &[],
     ));
     graph.node.push(node(
         "overflow_high",
         "Greater",
-        &["raw_acc_i64", "const_max_i64"],
+        &["raw_acc_rounded", "const_max_f32"],
         &["overflow_high_bool"],
         &[],
     ));
@@ -377,9 +379,23 @@ fn export_instruction_onnx(
         &[],
     ));
     graph.node.push(node(
+        "round_compare_rhs",
+        "Round",
+        &["compare_rhs"],
+        &["compare_rhs_rounded"],
+        &[],
+    ));
+    graph.node.push(node(
+        "cast_compare_rhs_i64",
+        "Cast",
+        &["compare_rhs_rounded"],
+        &["compare_rhs_i64"],
+        &[int_attribute("to", tensor_proto::DataType::INT64 as i64)],
+    ));
+    graph.node.push(node(
         "compare_less",
         "Less",
-        &["input_acc", "compare_rhs"],
+        &["input_acc_i64", "compare_rhs_i64"],
         &["less_than_bool"],
         &[],
     ));
@@ -764,15 +780,15 @@ fn input_layout() -> Vec<OnnxInputLayoutEntry> {
         },
     ];
 
-    for bit in 0..16 {
+    for bit in 0..WORD_BITS {
         layout.push(OnnxInputLayoutEntry {
             index: 9 + bit,
             name: format!("acc_bit_{bit}"),
         });
     }
-    for bit in 0..16 {
+    for bit in 0..WORD_BITS {
         layout.push(OnnxInputLayoutEntry {
-            index: 25 + bit,
+            index: 9 + WORD_BITS + bit,
             name: format!("operand_bit_{bit}"),
         });
     }
@@ -933,7 +949,7 @@ mod tests {
                 "pc mismatch for {instruction}"
             );
             assert_eq!(
-                onnx_output[1].round() as i64 as i16,
+                onnx_output[1].round() as Word,
                 native_transition.acc,
                 "acc mismatch for {instruction}"
             );
@@ -961,7 +977,7 @@ mod tests {
             let onnx_memory_write = (onnx_output[3] >= 0.5).then(|| {
                 (
                     onnx_output[4].round() as i64,
-                    onnx_output[5].round() as i64 as i16,
+                    onnx_output[5].round() as Word,
                 )
             });
             assert_eq!(

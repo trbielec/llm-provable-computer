@@ -98,7 +98,7 @@ fn exported_program_metadata_includes_execution_contract() {
     let reloaded = load_onnx_program_metadata(&export_dir).expect("reload metadata");
 
     assert_eq!(metadata, reloaded);
-    assert_eq!(metadata.input_dim, 41);
+    assert_eq!(metadata.input_dim, 9 + 2 * llm_provable_computer::WORD_BITS);
     assert_eq!(metadata.output_dim, 9);
     assert_eq!(
         metadata.program.instructions().len(),

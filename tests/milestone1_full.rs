@@ -9,7 +9,7 @@ use burn::backend::NdArray;
 use llm_provable_computer::{
     export_program_onnx, load_onnx_program_metadata, verify_engines, Attention2DMode,
     BurnExecutionRuntime, BurnTransformerVm, ExecutionRuntime, MachineState, NativeInterpreter,
-    OnnxExecutionRuntime, ProgramCompiler, TransformerVm, TransformerVmConfig,
+    OnnxExecutionRuntime, ProgramCompiler, TransformerVm, TransformerVmConfig, WORD_BITS,
 };
 use predicates::prelude::*;
 use serde::Deserialize;
@@ -29,7 +29,7 @@ struct WorkflowCase {
     path: &'static str,
     program_name: &'static str,
     config: TransformerVmConfig,
-    expected_acc: i16,
+    expected_acc: i64,
     max_steps: usize,
 }
 
@@ -67,7 +67,7 @@ fn python_validation_available() -> bool {
 fn run_python_validation(
     export_path: &Path,
     program_name: &str,
-    expected_acc: i16,
+    expected_acc: i64,
     max_steps: usize,
 ) -> PythonValidationReport {
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/validate_onnx.py");
@@ -234,7 +234,11 @@ fn milestone1_shipped_workflows_round_trip_across_all_artifacts_and_engines() {
             model.program().len(),
             "instruction count mismatch for {case:?}"
         );
-        assert_eq!(metadata.input_dim, 41, "unexpected input dim for {case:?}");
+        assert_eq!(
+            metadata.input_dim,
+            9 + 2 * WORD_BITS,
+            "unexpected input dim for {case:?}"
+        );
         assert_eq!(metadata.output_dim, 9, "unexpected output dim for {case:?}");
 
         for instruction in &metadata.instructions {

@@ -20,7 +20,7 @@ use crate::onnx_export::{
     load_onnx_program_metadata, OnnxInstructionMetadata, OnnxInstructionRead, OnnxProgramMetadata,
     ONNX_OUTPUT_DIM,
 };
-use crate::state::MachineState;
+use crate::state::{MachineState, Word};
 
 struct LoadedInstructionModel {
     metadata: OnnxInstructionMetadata,
@@ -173,7 +173,7 @@ impl OnnxExecutionRuntime {
         Ok(model)
     }
 
-    fn resolve_operand(&self, instruction: &OnnxInstructionMetadata) -> Result<i16> {
+    fn resolve_operand(&self, instruction: &OnnxInstructionMetadata) -> Result<Word> {
         match instruction.memory_read {
             OnnxInstructionRead::None => Ok(0),
             OnnxInstructionRead::Direct { address } => self
@@ -200,7 +200,7 @@ impl OnnxExecutionRuntime {
 
         if output[3] >= 0.5 {
             let address = checked_transition_u8("memory address", output[4].round() as i64)?;
-            let value = output[5].round() as i64 as i16;
+            let value = output[5].round() as Word;
             self.memory.store(address, value, self.step_count + 1)?;
         }
 
@@ -210,7 +210,7 @@ impl OnnxExecutionRuntime {
 
         Ok(MachineState {
             pc: next_pc,
-            acc: output[1].round() as i64 as i16,
+            acc: output[1].round() as Word,
             sp: next_sp,
             zero_flag: output[6] >= 0.5,
             carry_flag: output[7] >= 0.5,

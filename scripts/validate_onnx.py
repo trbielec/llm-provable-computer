@@ -13,10 +13,10 @@ from typing import Any
 import numpy as np
 import onnxruntime as ort
 
-INPUT_DIM = 41
+WORD_BITS = 64
+INPUT_DIM = 9 + 2 * WORD_BITS
 OUTPUT_DIM = 9
 FORMAT_VERSION = 1
-U16_MODULUS = 1 << 16
 
 EXPECTED_SHIPPED_RESULTS = {
     "addition": {"acc": 8, "halted": True},
@@ -37,10 +37,6 @@ def rust_round(value: float) -> int:
     if value >= 0.0:
         return int(math.floor(value + 0.5))
     return int(math.ceil(value - 0.5))
-
-
-def wrap_i16(value: int) -> int:
-    return ((int(value) + (1 << 15)) % U16_MODULUS) - (1 << 15)
 
 
 def checked_u8(field: str, value: int) -> int:
@@ -120,11 +116,12 @@ def build_input_vector(state: dict[str, Any], operand: int) -> np.ndarray:
     vector[0, 7] = float(state["sp"])
     vector[0, 8] = float(operand)
 
-    acc_bits = int(state["acc"]) & 0xFFFF
-    operand_bits = int(operand) & 0xFFFF
-    for bit in range(16):
+    bit_mask = (1 << WORD_BITS) - 1
+    acc_bits = int(state["acc"]) & bit_mask
+    operand_bits = int(operand) & bit_mask
+    for bit in range(WORD_BITS):
         vector[0, 9 + bit] = 1.0 if ((acc_bits >> bit) & 1) else 0.0
-        vector[0, 25 + bit] = 1.0 if ((operand_bits >> bit) & 1) else 0.0
+        vector[0, 9 + WORD_BITS + bit] = 1.0 if ((operand_bits >> bit) & 1) else 0.0
 
     return vector
 
@@ -136,7 +133,7 @@ def weighted_memory_value(history: list[tuple[int, int]], temperature: float) ->
     normalized = weights / np.sum(weights, dtype=np.float32)
     values = np.asarray([value for _, value in history], dtype=np.float32)
     blended = float(np.sum(normalized * values, dtype=np.float32))
-    return wrap_i16(rust_round(blended))
+    return rust_round(blended)
 
 
 def resolve_memory_read(
@@ -240,7 +237,7 @@ def execute_program(
     max_steps: int,
 ) -> dict[str, Any]:
     program = metadata["program"]
-    memory = [wrap_i16(int(value)) for value in program["initial_memory"]]
+    memory = [int(value) for value in program["initial_memory"]]
     state = {
         "pc": 0,
         "acc": 0,
@@ -293,7 +290,7 @@ def execute_program(
                 raise ValidationError(
                     f"memory address {write_addr} is out of bounds for memory size {len(memory)}"
                 )
-            write_value = wrap_i16(rust_round(float(transition[5])))
+            write_value = rust_round(float(transition[5]))
             memory[write_addr] = write_value
             histories[write_addr].append((step_count, write_value))
 
@@ -303,7 +300,7 @@ def execute_program(
 
         state = {
             "pc": next_pc,
-            "acc": wrap_i16(rust_round(float(transition[1]))),
+            "acc": rust_round(float(transition[1])),
             "sp": next_sp,
             "zero_flag": bool(float(transition[6]) >= 0.5),
             "carry_flag": bool(float(transition[7]) >= 0.5),

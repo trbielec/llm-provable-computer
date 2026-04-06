@@ -15,7 +15,7 @@ use crate::model::{
     validate_stack_precondition, CompiledInstruction, DispatchInfo, FeedForwardWeights, MemoryRead,
     Scalar, TransformerVm, TransitionControls, INPUT_DIM,
 };
-use crate::state::{decode_state, encode_state, MachineState};
+use crate::state::{decode_state, encode_state, MachineState, Word};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct BurnModelMetadata {
@@ -32,7 +32,7 @@ struct BurnInstructionMetadata {
 #[derive(Debug, Clone)]
 struct BurnForwardFrame<B: Backend> {
     output: Tensor<B, 1>,
-    operand: i16,
+    operand: Word,
     controls: TransitionControls,
 }
 
@@ -55,7 +55,7 @@ impl BurnAttention2D {
         state: &MachineState,
         memory_read: MemoryRead,
         memory: &AddressedMemory,
-    ) -> Result<Option<i16>> {
+    ) -> Result<Option<Word>> {
         let _ = self.num_heads;
         let mode = &self.mode.0;
         match memory_read {
@@ -76,7 +76,7 @@ impl BurnAttention2D {
         let value = self
             .read_value(state, memory_read, memory)?
             .unwrap_or_default();
-        Ok(Tensor::<B, 1>::from_data([Scalar::from(value)], device))
+        Ok(Tensor::<B, 1>::from_data([value as Scalar], device))
     }
 }
 
@@ -397,7 +397,7 @@ fn encode_state_tensor<B: Backend>(
     ))
 }
 
-fn decode_state_tensor<B: Backend>(tensor: Tensor<B, 1>, memory: Vec<i16>) -> Result<MachineState> {
+fn decode_state_tensor<B: Backend>(tensor: Tensor<B, 1>, memory: Vec<Word>) -> Result<MachineState> {
     let values = tensor.into_data().convert::<f32>();
     let slice = values
         .as_slice::<f32>()
@@ -556,11 +556,11 @@ mod tests {
                 .expect("stack");
 
             assert_eq!(
-                tensor_values(direct)[0].round() as i16,
+                tensor_values(direct)[0].round() as Word,
                 memory.load_with_mode(0, &mode).expect("native direct")
             );
             assert_eq!(
-                tensor_values(stack)[0].round() as i16,
+                tensor_values(stack)[0].round() as Word,
                 memory
                     .load_with_mode(state.sp, &mode)
                     .expect("native stack")
