@@ -92,7 +92,9 @@ HALT
     //
     // Wiring the manually-populated history into the prover is future work.
 
-    println!("\nGenerating proof of compiled program execution (fresh-state, not retrieval history)...");
+    println!(
+        "\nGenerating proof of compiled program execution (fresh-state, not retrieval history)..."
+    );
     let proof = llm_provable_computer::prove_execution_stark(&model, 10).expect("Prover failed");
     let is_valid = llm_provable_computer::verify_execution_stark(&proof).expect("Verifier failed");
 
