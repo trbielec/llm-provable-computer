@@ -152,7 +152,7 @@ The proof is **transparent** (no trusted setup), **post-quantum** (hash-based, n
 These commands use the classic VM / ISA path.
 
 ```bash
-git clone https://github.com/AbdelStark/llm-provable-computer && cd llm-provable-computer
+git clone https://github.com/trbielec/llm-provable-computer && cd llm-provable-computer
 
 # Run a program
 cargo run --bin tvm -- programs/fibonacci.tvm
@@ -177,6 +177,13 @@ cargo run --bin tvm -- verify-stark fib.proof.json
 
 # Verify transformer matches native interpreter (lockstep)
 cargo run --bin tvm -- run programs/fibonacci.tvm --verify-native
+
+# --- Batch execution (data-parallel testing) ---
+# Run N independent initial states in parallel (CPU)
+cargo run --bin tvm -- batch-run programs/fibonacci.tvm --count 65536
+
+# Run on Apple Silicon GPU (requires metal-batch feature)
+cargo run --features metal-batch --bin tvm -- batch-run programs/fibonacci.tvm --count 65536 --metal
 
 # Interactive TUI
 cargo run --bin tvm -- tui programs/fibonacci.tvm
@@ -377,6 +384,8 @@ The vanilla STARK prover operates over **F_p** where p = 1 + 407 &middot; 2^119 
 
 The AIR encodes each supported instruction as polynomial transition constraints over the trace columns `(PC, ACC, SP, zero_flag, carry_flag, halted, MEM[0..n])`. The boundary constraints pin the initial and final machine states.
 
+**Supported instruction families:** `NOP`, `LOADI`, `LOAD`, `STORE`, `PUSH`, `POP`, `ADD`/`ADDM`, `SUB`/`SUBM`, `MUL`/`MULM`, `AND`/`ANDM`, `OR`/`ORM`, `XOR`/`XORM`, `CALL`, `RET`, `JMP`, `JZ`, `JNZ`, `HALT`. Carry-bearing traces (overflow, subtraction borrow) are fully constrained. Executions must halt. `CMP`/`CMPM` and non-`average-hard` attention modes are not yet supported.
+
 ```bash
 # Prove
 cargo run --bin tvm -- prove-stark programs/factorial_recursive.tvm -o fact.proof.json
@@ -395,8 +404,8 @@ For large-scale transformer inference where full STARK proofs are computationall
 
 This approach provides a high-performance alternative by splitting verification into two phases:
 
-1.  **Commit**: The provider executes the program and issues a compact **Execution Receipt**. This receipt contains Merkle roots committing to the full execution trace and the model weights used. Current benchmark: **~1.2ms** for a single-step witness (see `cargo bench --bench commit_audit_benchmark`).
-2.  **Audit**: A user or auditor can request a proof for specific steps of the execution. The provider opens the Merkle paths for those steps and provides algebraic witnesses (using **Freivalds' algorithm**) to prove matrix-multiplication consistency. Current benchmark: **~864µs** audit verification for a single-step witness.
+1.  **Commit**: The provider executes the program and issues a compact **Execution Receipt**. This receipt contains Merkle roots committing to the full execution trace and the model weights used, and binds the executed program and initial machine state via canonical hashes (`program_hash`, `initial_state_hash`). Current benchmark: **~1.2ms** for a single-step witness (see `cargo bench --bench commit_audit_benchmark`).
+2.  **Audit**: A user or auditor can request a proof for specific steps of the execution. The provider opens the Merkle paths for those steps and provides algebraic witnesses (using **Freivalds' algorithm**) to prove matrix-multiplication consistency. The Freivalds check is fully implemented: both the challenge and witness are produced and verified end-to-end. Current benchmark: **~864µs** audit verification for a single-step witness.
 
 | Feature | Vanilla STARK | Commit-and-Audit |
 | :--- | :--- | :--- |
@@ -486,12 +495,14 @@ The `average-hard` mode is the only one supported by the STARK proof path. `soft
 | *(default)* | Transformer runtime, native interpreter, TUI, STARK prover |
 | `burn-model` | Burn tensor execution engine, `--verify-burn` |
 | `onnx-export` | ONNX export, Tract execution engine, `--verify-onnx` |
-| `full` | All of the above, `--verify-all` |
+| `metal-batch` | Apple Silicon GPU batch runner (`--metal` flag on `batch-run`), macOS only |
+| `full` | burn-model + onnx-export, `--verify-all` |
 
 ```bash
-cargo test                    # Core suite
-cargo test --features full    # Everything
-cargo bench                   # Hull + STARK benchmarks
+cargo test                             # Core suite
+cargo test --features full             # Everything
+cargo test --features metal-batch      # Includes Metal GPU batch runner
+cargo bench                            # Hull + STARK benchmarks
 ```
 
 ## Development Checks
@@ -556,9 +567,9 @@ scripts/                # Python ONNX validator
 
 Intentionally narrow. Intentionally correct.
 
-**Implemented:** Compact ISA with arithmetic, memory, stack, and control flow. Transformer execution with hull-backed 2D attention. Four independent execution engines with lockstep differential verification. Vanilla STARK proofs over VM execution traces. Direct DMN / cDMN decision proof paths. A reduced local Poet forward-pass proof path. Optimistic **Commit-and-Audit** protocol for scalable verifiable inference. Interactive TUI. CLI. Benchmarks. Property tests.
+**Implemented:** Compact ISA with arithmetic, bitwise, memory, stack, and control flow. Transformer execution with hull-backed 2D attention. Four independent execution engines with lockstep differential verification. Vanilla STARK proofs over VM execution traces covering arithmetic, bitwise, and carry-bearing instructions. Direct DMN / cDMN decision proof paths. A reduced local Poet forward-pass proof path. Optimistic **Commit-and-Audit** protocol with exact Freivalds algebraic verification and program/state binding. Data-parallel batch execution via CPU rayon and Apple Silicon Metal GPU (`metal-batch` feature). Interactive TUI. CLI. Benchmarks. Property tests.
 
-**Not implemented:** GPU acceleration. Learned/trained weights. Zero-knowledge proofs. WASM frontend. Production STWO prover integration. Full shared-`TransformerVm` STARK proving as the default path. Full-ISA STARK AIR for all VM and Poet instructions.
+**Not implemented:** Learned/trained weights. Zero-knowledge proofs. WASM frontend. Production STWO prover integration. Full shared-`TransformerVm` STARK proving as the default path. Full-ISA STARK AIR coverage (`CMP`/`CMPM`, non-`average-hard` attention modes).
 
 The narrowness is the point. The semantics are small enough to inspect, the test suite is strong enough to trust, and the structure is clean enough to prove over.
 
