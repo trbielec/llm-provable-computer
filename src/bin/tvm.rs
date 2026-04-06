@@ -912,7 +912,10 @@ fn batch_run_command(
             }
         }
         if mismatches == 0 {
-            println!("native_mismatches: 0  ✓ all {} results match", batch_finals.len());
+            println!(
+                "native_mismatches: 0  ✓ all {} results match",
+                batch_finals.len()
+            );
         } else {
             println!("native_mismatches: {mismatches}");
             return Err(VmError::InvalidConfig(format!(

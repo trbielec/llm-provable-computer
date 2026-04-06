@@ -104,7 +104,10 @@ fn default_scenario_credit_boundary() {
     }
 
     let approved = results.iter().filter(|r| r.final_state.acc == 1).count();
-    assert_eq!(approved, 231, "expected 231 approvals (620..=850), got {approved}");
+    assert_eq!(
+        approved, 231,
+        "expected 231 approvals (620..=850), got {approved}"
+    );
 }
 
 // ── Scenario 2: income below floor (income=40000, debt=12000) ────────────────

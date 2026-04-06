@@ -182,6 +182,9 @@ cargo run --bin tvm -- run programs/fibonacci.tvm --verify-native
 # Run N independent initial states in parallel (CPU)
 cargo run --bin tvm -- batch-run programs/fibonacci.tvm --count 65536
 
+# Heterogeneous batch: merge multiple programs into one dispatch
+cargo run --bin tvm -- batch-run programs/fibonacci.tvm programs/counter.tvm --count 65536
+
 # Run on Apple Silicon GPU (requires metal-batch feature)
 cargo run --features metal-batch --bin tvm -- batch-run programs/fibonacci.tvm --count 65536 --metal
 

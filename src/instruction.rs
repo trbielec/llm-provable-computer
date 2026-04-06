@@ -73,19 +73,25 @@ impl Instruction {
 
     pub fn with_offset(&self, offset: u8) -> Result<Self> {
         let add_offset = |target: u8| {
-            target.checked_add(offset).ok_or_else(|| VmError::InvalidConfig(format!(
-                "jump target {} with offset {} exceeds u8 limit",
-                target, offset
-            )))
+            target.checked_add(offset).ok_or_else(|| {
+                VmError::InvalidConfig(format!(
+                    "jump target {} with offset {} exceeds u8 limit",
+                    target, offset
+                ))
+            })
         };
 
         match *self {
             Instruction::Call(target) => Ok(Instruction::Call(add_offset(target)?)),
             Instruction::Jump(target) => Ok(Instruction::Jump(add_offset(target)?)),
             Instruction::JumpIfZero(target) => Ok(Instruction::JumpIfZero(add_offset(target)?)),
-            Instruction::JumpIfNotZero(target) => Ok(Instruction::JumpIfNotZero(add_offset(target)?)),
+            Instruction::JumpIfNotZero(target) => {
+                Ok(Instruction::JumpIfNotZero(add_offset(target)?))
+            }
             Instruction::JumpIfSign(target) => Ok(Instruction::JumpIfSign(add_offset(target)?)),
-            Instruction::JumpIfNotSign(target) => Ok(Instruction::JumpIfNotSign(add_offset(target)?)),
+            Instruction::JumpIfNotSign(target) => {
+                Ok(Instruction::JumpIfNotSign(add_offset(target)?))
+            }
             other => Ok(other),
         }
     }
