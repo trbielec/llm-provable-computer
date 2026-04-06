@@ -55,6 +55,28 @@ jobs:
       - name: Run cargo test
         run: cargo test ${{ matrix.cargo_args }}
 
+  proof-regression:
+    name: shared-transformer proof round-trips
+    runs-on: ubuntu-latest
+    # Only run on pushes to main; PRs rely on the fast default suite.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run proof round-trip regression
+        run: |
+          cargo test --release --test transformer_stark -- --include-ignored \
+            staged_skeleton_proof_round_trips_for_average_hard_execution \
+            forward_pass_proof_round_trips_for_average_hard_execution
+
   milestone-1-proof:
     name: export and validate ONNX workflow
     runs-on: ubuntu-latest

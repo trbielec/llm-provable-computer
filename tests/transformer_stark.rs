@@ -208,7 +208,7 @@ fn forward_pass_trace_validator_covers_instruction_families() {
 }
 
 #[test]
-#[ignore = "shared transformer proof round-trips remain expensive in the default suite"]
+#[ignore = "covered by the proof-regression CI job; too slow for the default local suite"]
 fn staged_skeleton_proof_round_trips_for_average_hard_execution() {
     let model = ProgramCompiler
         .compile_source(
@@ -377,7 +377,7 @@ fn staged_skeleton_profiled_proof_round_trips_for_average_hard_execution() {
 }
 
 #[test]
-#[ignore = "shared transformer proof round-trips remain expensive in the default suite"]
+#[ignore = "covered by the proof-regression CI job; too slow for the default local suite"]
 fn forward_pass_proof_round_trips_for_average_hard_execution() {
     let model = ProgramCompiler
         .compile_source(
