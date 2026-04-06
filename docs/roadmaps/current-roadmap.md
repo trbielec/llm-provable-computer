@@ -7,9 +7,20 @@ Hybrid proposal lane over the provable TVM microkernel
 ## Status
 
 - Date: April 6, 2026
-- Phase: investigation and architecture hardening
+- Phase: Phase 2 in progress (external state and effect roots)
 - Primary issue: `#29`
 - Supporting context: issue `#15` and the supplemental source-map comment on `#29`
+
+## Progress log
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| Phase 0: freeze and isolate | **complete** | Branch `issue-29-investigation` pushed; baselines in `docs/baselines/`; `proof-boundary.md` reconciled; `JS`/`JNS` added to supported lists; roadmap benchmark command corrected |
+| Phase 1: `ProposalReceipt` | **complete** | `src/proposal_receipt.rs`; 10 integration tests in `tests/proposal_receipt.rs`; all suites green |
+| Phase 2: external state and effect roots | not started | — |
+| Phase 3: candidate-parallel evaluation | not started | — |
+| Phase 4: planner integration | not started | — |
+| Phase 5: serving-side overlap experiments | not started | — |
 
 ## Product statement
 
@@ -174,22 +185,22 @@ The investigation must stop or roll back if any of the following becomes true:
 
 ## Implementation phases
 
-## Phase 0: freeze and isolate
+## Phase 0: freeze and isolate — COMPLETE
 
 Deliverables:
 
-- clean investigation worktree and branch,
-- baseline test report,
-- baseline benchmark report,
-- this roadmap checked into the repo and referenced from top-level docs.
+- clean investigation worktree and branch, ✓
+- baseline test report, ✓ (`docs/baselines/phase0-test-baseline.md`)
+- baseline benchmark report, ✓ (`docs/baselines/phase0-benchmark-baseline.md`)
+- this roadmap checked into the repo and referenced from top-level docs. ✓
 
 Exit criteria:
 
-- clean branch exists,
-- baseline commands are repeatable,
-- default claim language is still precise.
+- clean branch exists, ✓ (`issue-29-investigation` on `origin`)
+- baseline commands are repeatable, ✓
+- default claim language is still precise. ✓ (`proof-boundary.md` reconciled with source)
 
-## Phase 1: `ProposalReceipt`
+## Phase 1: `ProposalReceipt` — COMPLETE
 
 Objective:
 

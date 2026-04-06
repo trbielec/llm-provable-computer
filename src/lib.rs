@@ -33,6 +33,7 @@ pub mod onnx_export;
 pub mod onnx_runtime;
 pub mod poet_proof;
 pub mod proof;
+pub mod proposal_receipt;
 pub mod runtime;
 pub mod state;
 pub mod transformer_stark;
