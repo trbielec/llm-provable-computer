@@ -1,5 +1,5 @@
 <identity>
-llm-provable-computer is an implemented Rust workspace for a deterministic transformer-shaped virtual machine and an in-tree vanilla STARK prover over its execution trace. Milestone 1 and Milestone 2 are complete in the repository; Milestone 3 (STWO integration) is the next major target.
+llm-provable-computer is an implemented Rust workspace for a deterministic transformer-shaped virtual machine and an in-tree vanilla STARK prover over its execution trace. Milestone 1 and Milestone 2 are complete. The issue-29 proposal-lane investigation is also complete, adding an optional orchestration layer (ProposalReceipt, EffectBoundary, CandidateEvaluator, PlannerBridge, OverlapOrchestrator) on top of the existing deterministic kernel without changing any existing execution path. Milestone 3 (STWO integration) is the next major target.
 </identity>
 
 <roadmap>
@@ -36,8 +36,9 @@ Current roadmap: `docs/roadmaps/current-roadmap.md`
   - rejected: softmax and hard-softmax proof paths, `CMP`/`CMPM` compare instructions, non-halted executions
 - Commit-and-Audit: receipts bind `program_hash` and `initial_state_hash`; Freivalds algebraic check is fully implemented (not a stub)
 - Batch execution: `BatchRunner` (CPU rayon) and `MetalBatchRunner` (Apple Silicon GPU, `metal-batch` feature) both available; heterogeneous batch merges multiple programs into a shared PC space via `Program::merge`
-- Benchmarks: `commit_audit_benchmark` reports ~1.18ms commits, ~318µs audit generation, and ~832µs verification (release); the new `batch_benchmark` shows ~325µs for 64 runs, 1.04ms for 256, 3.81ms for 1,024, and 14.7ms for 4,096 CPU `BatchRunner` executions (Criterion with 5s measurements).
+- Benchmarks: `commit_audit_benchmark` reports ~1.28ms commits, ~333µs audit generation, and ~906µs verification (release); `batch_benchmark` shows ~339µs for 64 runs, 1.09ms for 256, 3.99ms for 1,024, and 15.3ms for 4,096 CPU `BatchRunner` executions; `overlap_benchmark` shows ~120µs sequential and ~158µs overlapped for k=4 candidates with `StaticPlanner` (Criterion with 5s measurements).
 - Current proof is transparent, not zero-knowledge: the public claim includes the program, attention mode, step count, and final state.
+- Proposal pipeline (issue-29, complete): `ProposalReceipt` (typed hash-bound planner receipt), `EffectBoundary` (committed external state/effect log), `CandidateEvaluator` (k-parallel rayon execution + deterministic selection), `PlannerBridge` (Planner trait + AdmissibilityFilter + pipeline orchestration), `OverlapOrchestrator` (Sequential/Overlapped timing measurement). Programs are in .tvm assembly — no WASM. Only `StaticPlanner` is provided; real LLM integration requires a user-supplied `Planner` impl.
 </status>
 
 <structure>
@@ -76,6 +77,11 @@ src/
   dmn_decision.rs       # Direct decision proof types and hash binding
   dmn_direct.rs         # Direct DMN STARK prover
   cdmn/                 # cDMN parser, schema, IR, proof backend, and STARK compat
+  proposal_receipt.rs   # ProposalReceipt — typed hash-bound planner output receipt
+  effect_root.rs        # EffectBoundary, EffectLog, StateRoot — committed external state
+  candidate_eval.rs     # CandidateEvaluator — k-parallel rayon execution + deterministic selection
+  planner_bridge.rs     # PlannerBridge, Planner trait, AdmissibilityFilter, StaticPlanner
+  overlap.rs            # OverlapOrchestrator — Sequential/Overlapped latency measurement
   verification.rs       # Lockstep engine comparison
   tui.rs                # ratatui execution viewer
   vanillastark/         # Field, polynomial, Merkle, FRI, STARK internals
@@ -116,6 +122,7 @@ scripts/
 | CPU batch run | `cargo run --bin tvm -- batch-run programs/fibonacci.tvm --count 65536` | N parallel runs via rayon |
 | Heterogeneous batch | `cargo run --bin tvm -- batch-run prog_a.tvm prog_b.tvm --count 65536` | Multiple programs merged into one dispatch |
 | Metal GPU batch run | `cargo run --features metal-batch --bin tvm -- batch-run programs/fibonacci.tvm --count 65536 --metal` | Apple Silicon GPU, macOS only |
+| Run proposal pipeline example | `cargo run --example proposal_pipeline` | End-to-end: StaticPlanner → AdmissibilityFilter → CandidateEvaluator → OverlapOrchestrator |
 | Review doc drift | `git diff -- README.md CLAUDE.md docs/` | Use before finishing doc/context work |
 </commands>
 
@@ -159,7 +166,8 @@ scripts/
   | `prove-stark` rejects a program | Unsupported instruction or attention mode | Check `src/proof.rs::validate_proof_inputs`; only `CMP`/`CMPM` and non-`average-hard` modes are rejected; carry-bearing and bitwise traces are now accepted |
   | Burn or ONNX commands are unavailable | Missing feature flag | Re-run with `--features burn-model`, `--features onnx-export`, or `--features full` |
   | `--metal` flag not found on `batch-run` | Missing feature flag or non-macOS | Re-run with `--features metal-batch` on macOS/Apple Silicon |
-  | Docs mention WASM compilation as current behavior | Stale pre-implementation text | Prefer `README.md`, `CLAUDE.md`, and the source tree over old planning language |
+  | Docs mention WASM compilation as current behavior | Stale pre-implementation text | WASM was never implemented; programs are in .tvm assembly only |
+  | `PlannerBridge` pipeline has no LLM | `StaticPlanner` is a test double | A real LLM integration requires a user-supplied struct implementing the `Planner` trait in `src/planner_bridge.rs` |
   | An engine mismatch appears during verification | Trace divergence across runtimes | Inspect `ExecutionTraceEntry` output and compare instruction/state pairs |
   </known_issues>
 </troubleshooting>

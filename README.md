@@ -29,7 +29,7 @@ Based on [*Can LLMs Be Computers?*](https://www.percepta.ai/blog/can-llms-be-com
 
 ## Current Roadmap
 
-The current roadmap for the hybrid proposal-lane investigation is `docs/roadmaps/current-roadmap.md`.
+The hybrid proposal-lane investigation (`issue-29`, `docs/roadmaps/current-roadmap.md`) is complete. See [Proposal Pipeline](#proposal-pipeline) below.
 
 ---
 
@@ -214,6 +214,55 @@ memory: [13, 21, 21, 7, 7]
 elapsed_ms: 9.760
 throughput_steps_per_sec: 10553.55
 ```
+
+---
+
+## Proposal Pipeline
+
+The repo now includes an optional orchestration layer (all opt-in, no changes to the default execution paths) that adds a typed boundary between a probabilistic planner and the deterministic VM kernel.
+
+### What was added
+
+| Module | What it does |
+|--------|-------------|
+| `proposal_receipt` | A `ProposalReceipt` binds a planner's prompt, model identity, output, and sampling parameters under a single Blake2b hash. Any tamper to any field is detectable. |
+| `effect_root` | An `EffectBoundary` makes external reads and writes explicit and hash-committed — no implicit host callbacks into the kernel. |
+| `candidate_eval` | A `CandidateEvaluator` runs `k` candidate programs in parallel (rayon) from a shared initial state and selects a winner deterministically. |
+| `planner_bridge` | A `PlannerBridge` orchestrates the full pipeline: a `Planner` produces proposals in `.tvm` assembly → `AdmissibilityFilter` rejects unsupported instructions → admitted candidates get receipts → `CandidateEvaluator` picks the best result. |
+| `overlap` | An `OverlapOrchestrator` measures the latency savings from running a fallback kernel concurrently while the planner is working. |
+
+### What "planner" means here
+
+A `Planner` is a Rust trait. Any implementation can supply the candidates — an LLM API call, a rule engine, a static list. The repo ships `StaticPlanner` as a test double. A real LLM-backed implementation would call an external API and emit `.tvm` assembly source text.
+
+Programs are in the repo's own TVM assembly language (e.g. `LOADI 42\nHALT`), not WASM or any external format.
+
+### Running the example
+
+```bash
+cargo run --example proposal_pipeline
+```
+
+This shows three simulated proposals (one with invalid syntax, rejected at the gate), an external state boundary with a committed read, and both Sequential and Overlapped timing modes:
+
+```
+Effect boundary hash: 2bff11e41744d07f...
+── Sequential mode ───
+  Admitted:       2 (invalid syntax rejected)
+  Selected ACC:   100
+  Pipeline time:  ~4500 µs
+── Overlapped mode ───
+  Fallback kernel: ~3100 µs (ran concurrently)
+  Overlap savings: ~300 µs
+```
+
+With a real LLM planner (200 ms–2 s round-trip), the overlap savings scale to hundreds of milliseconds — the kernel runs essentially for free during planner latency.
+
+### What is not yet here
+
+- No real LLM `Planner` implementation — that requires a user-supplied struct implementing the `Planner` trait.
+- No CLI subcommand for the pipeline — it is a library-level API.
+- No proof coverage for planner internals — the STARK proves deterministic kernel execution only.
 
 ---
 
