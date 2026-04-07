@@ -33,6 +33,11 @@ pub mod model;
 pub mod onnx_export;
 #[cfg(feature = "onnx-export")]
 pub mod onnx_runtime;
+pub mod planner_bridge;
+pub use planner_bridge::{
+    AdmissibilityFilter, AdmissibilityResult, Planner, PlannerBridge, PlannerBridgeResult,
+    PlannerContext, ProposedCandidate, StaticPlanner,
+};
 pub mod poet_proof;
 pub mod proof;
 pub mod proposal_receipt;

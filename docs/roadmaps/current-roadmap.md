@@ -7,7 +7,7 @@ Hybrid proposal lane over the provable TVM microkernel
 ## Status
 
 - Date: April 6, 2026
-- Phase: Phase 4 in progress (planner integration)
+- Phase: Phase 5 in progress (serving-side overlap experiments)
 - Primary issue: `#29`
 - Supporting context: issue `#15` and the supplemental source-map comment on `#29`
 
@@ -19,7 +19,7 @@ Hybrid proposal lane over the provable TVM microkernel
 | Phase 1: `ProposalReceipt` | **complete** | `src/proposal_receipt.rs`; 10 integration tests in `tests/proposal_receipt.rs`; all suites green |
 | Phase 2: external state and effect roots | **complete** | `src/effect_root.rs`; 15 integration tests in `tests/effect_root.rs`; all suites green |
 | Phase 3: candidate-parallel evaluation | **complete** | `src/candidate_eval.rs`; 6 unit + 10 integration tests; `MachineState::Default` added to `src/state.rs`; all suites green |
-| Phase 4: planner integration | not started | — |
+| Phase 4: planner integration | **complete** | `src/planner_bridge.rs`; `Planner` trait + `StaticPlanner` + `AdmissibilityFilter` + `PlannerBridge`; 9 unit + 12 integration tests; all suites green |
 | Phase 5: serving-side overlap experiments | not started | — |
 
 ## Product statement
@@ -274,7 +274,7 @@ Exit criteria:
 - no regression to the current single-program path,
 - benchmark deltas are captured.
 
-## Phase 4: planner integration
+## Phase 4: planner integration — COMPLETE
 
 Objective:
 
