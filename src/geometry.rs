@@ -1,14 +1,16 @@
+use serde::{Deserialize, Serialize};
+
 use crate::config::Attention2DMode;
 use crate::error::{Result, VmError};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Point2D {
     pub x: f32,
     pub y: f32,
     pub id: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Entry {
     point: Point2D,
     value: Vec<f32>,
@@ -22,7 +24,7 @@ struct Entry {
 ///
 /// Queries find the key maximizing `dot(query, key)` in O(log h) via ternary
 /// search on the hull, where h is the hull size.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HullKvCache {
     entries: Vec<Entry>,
     /// Upper hull indices, sorted by ascending x-coordinate.

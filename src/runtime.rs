@@ -67,10 +67,10 @@ impl ExecutionRuntime {
 
         let before = self.state.clone();
         let dispatch = self.model.dispatch_info(self.state.pc)?;
-        let next = self
-            .model
-            .step(&self.state, &mut self.memory, self.step_count + 1)?;
-        self.state = next;
+        let witness =
+            self.model
+                .step_with_witness(&self.state, &mut self.memory, self.step_count + 1)?;
+        self.state = witness.final_state;
         self.step_count += 1;
         record_execution_step(
             &mut self.trace,
@@ -80,6 +80,7 @@ impl ExecutionRuntime {
             dispatch.instruction,
             before,
             &self.state,
+            Some(witness.operand),
         );
         Ok(&self.state)
     }
@@ -127,6 +128,7 @@ impl ExecutionRuntime {
             witness.dispatch.instruction,
             before,
             &self.state,
+            Some(witness.operand),
         );
         Ok(witness)
     }

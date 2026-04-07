@@ -115,6 +115,7 @@ impl OnnxExecutionRuntime {
             instruction_model.instruction,
             before,
             &self.state,
+            None,
         );
 
         Ok(&self.state)

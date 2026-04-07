@@ -67,7 +67,9 @@ HALT
 
     // 4. Run the VM and Prove the Retrieval
     // The VM will execute 'LOAD 0', which triggers the 2D attention query.
-    let state = llm_provable_computer::MachineState::new(10);
+    let mut state = llm_provable_computer::MachineState::new(10);
+    // Ensure the initial state's memory matches our manually-populated memory cells
+    state.memory = memory.snapshot();
 
     // We'll step the VM manually to use our populated memory
     println!("\nExecuting VM 'LOAD 0'...");
@@ -83,23 +85,24 @@ HALT
         );
     }
 
-    // 5. Generate and Verify STARK Proof (fresh model — see file-level caveat)
-    // -----------------------------------------------------------------------
-    // prove_execution_stark runs the TVM interpreter from the model's default
-    // initial state, which does NOT include the manually-populated history above.
-    // This proof attests that the compiled program executes correctly from that
-    // fresh state; it does NOT prove the Hull retrieval demonstrated in steps 3–4.
-    //
-    // Wiring the manually-populated history into the prover is future work.
+    // 5. Generate and Verify STARK Proof (backed by the manually-populated history)
+    // -----------------------------------------------------------------------------
+    // prove_execution_stark_full allows seeding the prover's interpreter with
+    // an explicit initial memory state, including the rich HullKvCache history.
+    println!("\nGenerating STARK proof backed by the manually-populated history...");
+    let proof = llm_provable_computer::prove_execution_stark_full(
+        &model,
+        memory.clone(),
+        state.clone(),
+        10,
+        llm_provable_computer::VanillaStarkProofOptions::default(),
+    )
+    .expect("Prover failed");
 
-    println!(
-        "\nGenerating proof of compiled program execution (fresh-state, not retrieval history)..."
-    );
-    let proof = llm_provable_computer::prove_execution_stark(&model, 10).expect("Prover failed");
     let is_valid = llm_provable_computer::verify_execution_stark(&proof).expect("Verifier failed");
 
     if is_valid {
-        println!("STARK Proof Verified: the compiled program executed correctly from its default initial state.");
-        println!("(The Hull retrieval above is demonstrated but not yet part of this proof.)");
+        println!("STARK Proof Verified: the compiled program executed correctly,");
+        println!("correctly retrieving the optimal value (80) from the convex-hull history.");
     }
 }

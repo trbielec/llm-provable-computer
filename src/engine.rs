@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::error::Result;
 use crate::instruction::Instruction;
-use crate::state::MachineState;
+use crate::state::{MachineState, Word};
 
 #[derive(Debug, Clone)]
 pub struct ExecutionResult {
@@ -20,6 +20,7 @@ pub struct ExecutionTraceEntry {
     pub instruction: Instruction,
     pub state_before: MachineState,
     pub state_after: MachineState,
+    pub operand: Option<Word>,
 }
 
 #[derive(Debug, Clone)]
@@ -71,6 +72,7 @@ pub(crate) fn build_execution_result(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn record_execution_step(
     trace: &mut Vec<MachineState>,
     events: &mut Vec<ExecutionTraceEntry>,
@@ -79,6 +81,7 @@ pub(crate) fn record_execution_step(
     instruction: Instruction,
     state_before: MachineState,
     state_after: &MachineState,
+    operand: Option<Word>,
 ) {
     let state_after = state_after.clone();
     trace.push(state_after.clone());
@@ -88,6 +91,7 @@ pub(crate) fn record_execution_step(
         instruction,
         state_before,
         state_after,
+        operand,
     });
 }
 
