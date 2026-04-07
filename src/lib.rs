@@ -33,6 +33,7 @@ pub mod model;
 pub mod onnx_export;
 #[cfg(feature = "onnx-export")]
 pub mod onnx_runtime;
+pub mod overlap;
 pub mod planner_bridge;
 pub use planner_bridge::{
     AdmissibilityFilter, AdmissibilityResult, Planner, PlannerBridge, PlannerBridgeResult,
