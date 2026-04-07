@@ -100,6 +100,7 @@ impl FallbackProgram {
 
 /// Runs the planner bridge pipeline with optional concurrent fallback kernel
 /// execution, making the overlap opportunity *measurable*.
+#[derive(Clone)]
 pub struct OverlapOrchestrator {
     config: TransformerVmConfig,
     max_steps: usize,
