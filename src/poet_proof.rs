@@ -589,7 +589,14 @@ fn poet_instruction_required_ff_dim(instruction: Instruction) -> Option<usize> {
         | Instruction::XorImmediate(_)
         | Instruction::XorMemory(_)
         | Instruction::JumpIfSign(_)
-        | Instruction::JumpIfNotSign(_) => None,
+        | Instruction::JumpIfNotSign(_)
+        | Instruction::GetLocal(_)
+        | Instruction::SetLocal(_)
+        | Instruction::Loop
+        | Instruction::EndLoop
+        | Instruction::BranchIfNotZero(_)
+        | Instruction::IRead(_)
+        | Instruction::IWrite(_) => None,
     }
 }
 
@@ -632,8 +639,15 @@ impl PoetInstructionCompiler {
             | Instruction::XorImmediate(_)
             | Instruction::XorMemory(_)
             | Instruction::JumpIfSign(_)
-            | Instruction::JumpIfNotSign(_) => Err(VmError::UnsupportedProof(
-                "poet reduced profile does not yet support bitwise or sign-branch instructions"
+            | Instruction::JumpIfNotSign(_)
+            | Instruction::GetLocal(_)
+            | Instruction::SetLocal(_)
+            | Instruction::Loop
+            | Instruction::EndLoop
+            | Instruction::BranchIfNotZero(_)
+            | Instruction::IRead(_)
+            | Instruction::IWrite(_) => Err(VmError::UnsupportedProof(
+                "poet reduced profile does not yet support bitwise, sign-branch, local, or I/O instructions"
                     .to_string(),
             )),
         }

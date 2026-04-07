@@ -27,6 +27,12 @@ Based on [*Can LLMs Be Computers?*](https://www.percepta.ai/blog/can-llms-be-com
 
 ---
 
+## Current Roadmap
+
+The current roadmap for the hybrid proposal-lane investigation is `docs/roadmaps/current-roadmap.md`.
+
+---
+
 ## Read This First
 
 The same terms mean different things in different papers. In this repo:
@@ -331,7 +337,16 @@ fact_base:
 | `JMP label` | Unconditional jump |
 | `JZ label` | Jump if `zero_flag` |
 | `JNZ label` | Jump if not `zero_flag` |
+| `JS label` | Jump if ACC < 0 (sign flag) |
+| `JNS label` | Jump if ACC ≥ 0 |
 | `HALT` | Stop execution |
+| `GETLOCAL n` | `ACC = MEM[240+n]` (local slot 0–15) |
+| `SETLOCAL n` | `MEM[240+n] = ACC` (local slot 0–15) |
+| `LOOP` | NOP — readable loop-header marker |
+| `ENDLOOP` | NOP — readable loop-footer marker |
+| `BRIF label` | Jump to label if ACC ≠ 0; fall through if ACC = 0 |
+| `IREAD key` | `ACC = MEM[224+key]` (I/O buffer slot 0–15) |
+| `IWRITE key` | `MEM[224+key] = ACC` (I/O buffer slot 0–15) |
 
 </details>
 
@@ -393,7 +408,7 @@ The vanilla STARK prover operates over **F_p** where p = 1 + 407 &middot; 2^119 
 
 The AIR encodes each supported instruction as polynomial transition constraints over the trace columns `(PC, ACC, SP, zero_flag, carry_flag, halted, MEM[0..n])`. The boundary constraints pin the initial and final machine states.
 
-**Supported instruction families:** `NOP`, `LOADI`, `LOAD`, `STORE`, `PUSH`, `POP`, `ADD`/`ADDM`, `SUB`/`SUBM`, `MUL`/`MULM`, `AND`/`ANDM`, `OR`/`ORM`, `XOR`/`XORM`, `CALL`, `RET`, `JMP`, `JZ`, `JNZ`, `HALT`. Carry-bearing traces (overflow, subtraction borrow) are fully constrained. Executions must halt. `CMP`/`CMPM` and non-`average-hard` attention modes are not yet supported.
+**Supported instruction families:** `NOP`, `LOADI`, `LOAD`, `STORE`, `PUSH`, `POP`, `ADD`/`ADDM`, `SUB`/`SUBM`, `MUL`/`MULM`, `AND`/`ANDM`, `OR`/`ORM`, `XOR`/`XORM`, `CALL`, `RET`, `JMP`, `JZ`, `JNZ`, `JS`, `JNS`, `HALT`, `GETLOCAL`/`SETLOCAL` (local variable slots 240–255), `LOOP`/`ENDLOOP`/`BRIF` (structured loops), `IREAD`/`IWRITE` (committed I/O buffer 224–239). Carry-bearing traces (overflow, subtraction borrow) are fully constrained. Executions must halt. `CMP`/`CMPM` and non-`average-hard` attention modes are not yet supported.
 
 ```bash
 # Prove
@@ -404,6 +419,71 @@ cargo run --bin tvm -- verify-stark fact.proof.json
 ```
 
 The proof is transparent and public. The claim includes the program, attention mode, step count, and final state. Zero-knowledge hiding is out of scope.
+
+---
+
+## Local Variables, Structured Loops, and Provable I/O
+
+Three capabilities added on top of the core ISA, all with full vanilla STARK AIR coverage.
+
+### Memory Map
+
+| Address range | Purpose |
+|---|---|
+| 0 – 223 | General memory (stack, data) |
+| 224 – 239 | I/O buffer (`IREAD key` / `IWRITE key`, keys 0–15) |
+| 240 – 255 | Local variable slots (`GETLOCAL n` / `SETLOCAL n`, slots 0–15) |
+
+Programs using locals must declare `.memory 255`; programs using I/O must declare `.memory 240` (or more).
+
+### Local Variables
+
+```
+.memory 255
+LOADI 3
+SETLOCAL 0      ; local[0] = 3
+LOADI 7
+GETLOCAL 0      ; ACC = 3
+ADD 7           ; ACC = 10
+HALT
+```
+
+`SETLOCAL`/`GETLOCAL` are proved identically to `STORE`/`LOAD` — same AIR polynomial pattern, different address range. No new columns.
+
+### Structured Loops
+
+```
+LOADI 5
+loop_start: LOOP
+  SUB 1
+  BRIF loop_start   ; jump back if ACC ≠ 0
+ENDLOOP
+HALT
+```
+
+`LOOP`/`ENDLOOP` are NOP-equivalent markers. `BRIF` is proved the same way as `JNZ`.
+
+### Provable I/O
+
+I/O uses an _externally-committed witness_ pattern. Before execution, the caller injects values into addresses 224–239; the STARK then proves the execution used those exact values.
+
+```rust
+let mut io_input = IoBuffer::new();
+io_input.set(0, 19);   // input[0] = 19
+io_input.set(1, 23);   // input[1] = 23
+
+let proved = prove_io_execution_stark(&model, &io_input, 64,
+    VanillaStarkProofOptions::default())?;
+
+// Two-layer audit:
+// 1. STARK proof: execution was deterministic from initial_state
+// 2. input_values: verifier checks initial_state.memory[224..240] matches
+assert!(verify_io_execution_stark_full(&proved)?);
+```
+
+```bash
+cargo run --example local_vars_and_io
+```
 
 ---
 
@@ -582,7 +662,7 @@ scripts/                # Python ONNX validator
 
 Intentionally narrow. Intentionally correct.
 
-**Implemented:** Compact ISA with arithmetic, bitwise, memory, stack, and control flow. Transformer execution with hull-backed 2D attention. Four independent execution engines with lockstep differential verification. Vanilla STARK proofs over VM execution traces covering arithmetic, bitwise, and carry-bearing instructions. Direct DMN / cDMN decision proof paths. A reduced local Poet forward-pass proof path. Optimistic **Commit-and-Audit** protocol with exact Freivalds algebraic verification and program/state binding. Data-parallel batch execution via CPU rayon and Apple Silicon Metal GPU (`metal-batch` feature). Interactive TUI. CLI. Benchmarks. Property tests.
+**Implemented:** Compact ISA with arithmetic, bitwise, memory, stack, control flow, local variable slots (`GETLOCAL`/`SETLOCAL`), structured loops (`LOOP`/`ENDLOOP`/`BRIF`), and externally-committed I/O (`IREAD`/`IWRITE`). Transformer execution with hull-backed 2D attention. Four independent execution engines with lockstep differential verification. Vanilla STARK proofs over VM execution traces covering all of the above instruction families. Direct DMN / cDMN decision proof paths. A reduced local Poet forward-pass proof path. Optimistic **Commit-and-Audit** protocol with exact Freivalds algebraic verification and program/state binding. `prove_io_execution_stark` + `ProvedIoExecution` two-layer I/O audit chain. Data-parallel batch execution via CPU rayon and Apple Silicon Metal GPU (`metal-batch` feature). Interactive TUI. CLI. Benchmarks. Property tests.
 
 **Not implemented:** Learned/trained weights. Zero-knowledge proofs. WASM frontend. Production STWO prover integration. Full shared-`TransformerVm` STARK proving as the default path. Full-ISA STARK AIR coverage (`CMP`/`CMPM`, non-`average-hard` attention modes).
 

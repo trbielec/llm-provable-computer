@@ -2,6 +2,10 @@
 llm-provable-computer is an implemented Rust workspace for a deterministic transformer-shaped virtual machine and an in-tree vanilla STARK prover over its execution trace. Milestone 1 and Milestone 2 are complete in the repository; Milestone 3 (STWO integration) is the next major target.
 </identity>
 
+<roadmap>
+Current roadmap: `docs/roadmaps/current-roadmap.md`
+</roadmap>
+
 <stack>
 | Layer | Technology | Version | Notes |
 |-------|------------|---------|-------|
@@ -27,8 +31,11 @@ llm-provable-computer is an implemented Rust workspace for a deterministic trans
   - `cargo test --all-features`
   - `cargo test --features metal-batch`
 - Current vanilla STARK scope:
-  - supported: `NOP`, `LOADI`, `LOAD`, `STORE`, `PUSH`, `POP`, `ADD`, `ADDM`, `SUB`, `SUBM`, `MUL`, `MULM`, `AND`, `ANDM`, `OR`, `ORM`, `XOR`, `XORM`, `CALL`, `RET`, `JMP`, `JZ`, `JNZ`, `HALT`
+  - supported: `NOP`, `LOADI`, `LOAD`, `STORE`, `PUSH`, `POP`, `ADD`, `ADDM`, `SUB`, `SUBM`, `MUL`, `MULM`, `AND`, `ANDM`, `OR`, `ORM`, `XOR`, `XORM`, `CALL`, `RET`, `JMP`, `JZ`, `JNZ`, `JS`, `JNS`, `HALT`, `GETLOCAL`, `SETLOCAL`, `LOOP`, `ENDLOOP`, `BRIF`, `IREAD`, `IWRITE`
   - carry flag: fully constrained; carry-bearing traces (overflow, subtraction borrow) are accepted and carry correctness is verified by the AIR (not a free witness)
+  - local variable slots: `GETLOCAL n` / `SETLOCAL n` map to addresses 240–255; programs must declare `.memory 255` (or more); slots 0–15 only
+  - I/O buffer: `IREAD key` / `IWRITE key` map to addresses 224–239 (keys 0–15); use `prove_io_execution_stark` + `ProvedIoExecution` for the two-layer audit chain (kernel STARK + committed external values)
+  - `LOOP` / `ENDLOOP` are NOP-equivalent loop markers; `BRIF target` branches if ACC ≠ 0
   - rejected: softmax and hard-softmax proof paths, `CMP`/`CMPM` compare instructions, non-halted executions
 - Commit-and-Audit: receipts bind `program_hash` and `initial_state_hash`; Freivalds algebraic check is fully implemented (not a stub)
 - Batch execution: `BatchRunner` (CPU rayon) and `MetalBatchRunner` (Apple Silicon GPU, `metal-batch` feature) both available; heterogeneous batch merges multiple programs into a shared PC space via `Program::merge`
@@ -58,7 +65,8 @@ src/
   model.rs              # TransformerVm and compiled transition logic
   runtime.rs            # Transformer execution loop
   state.rs              # MachineState and token encoding
-  proof.rs              # Execution-proof plumbing and AIR wiring
+  proof.rs              # Execution-proof plumbing and AIR wiring (classic native-trace STARK)
+  io_buffer.rs          # IoBuffer, ProvedIoExecution, prove_io_execution_stark — two-layer I/O audit
   verification.rs       # Lockstep engine comparison
   tui.rs                # ratatui execution viewer
   vanillastark/         # Field, polynomial, Merkle, FRI, STARK internals
@@ -99,6 +107,7 @@ scripts/
 | CPU batch run | `cargo run --bin tvm -- batch-run programs/fibonacci.tvm --count 65536` | N parallel runs via rayon |
 | Heterogeneous batch | `cargo run --bin tvm -- batch-run prog_a.tvm prog_b.tvm --count 65536` | Multiple programs merged into one dispatch |
 | Metal GPU batch run | `cargo run --features metal-batch --bin tvm -- batch-run programs/fibonacci.tvm --count 65536 --metal` | Apple Silicon GPU, macOS only |
+| Run local vars + I/O example | `cargo run --example local_vars_and_io` | End-to-end: SETLOCAL/GETLOCAL, BRIF loop, IREAD/IWRITE with proof |
 | Review doc drift | `git diff -- README.md CLAUDE.md docs/` | Use before finishing doc/context work |
 </commands>
 

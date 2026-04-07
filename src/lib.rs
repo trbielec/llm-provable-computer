@@ -24,6 +24,7 @@ pub mod freivalds;
 pub mod geometry;
 pub mod instruction;
 pub mod interpreter;
+pub mod io_buffer;
 pub mod memory;
 pub mod merkle_trace;
 pub mod model;
@@ -115,6 +116,10 @@ pub use error::{Result, VmError};
 pub use geometry::{HullKvCache, Point2D};
 pub use instruction::{Instruction, Program};
 pub use interpreter::{NativeExecutionResult, NativeInterpreter, NativeTraceEntry};
+pub use io_buffer::{
+    prove_io_execution_stark, verify_io_execution_stark, verify_io_execution_stark_full, IoBuffer,
+    ProvedIoExecution, IO_BASE_ADDRESS, IO_CAPACITY,
+};
 pub use memory::AddressedMemory;
 pub use model::{
     DispatchInfo, SharedTransformerExactDomainViolation, SharedTransformerExecutionWitness,
@@ -129,9 +134,9 @@ pub use onnx_export::{
 pub use onnx_runtime::OnnxExecutionRuntime;
 pub use proof::{
     estimate_execution_stark_cost, load_execution_stark_proof, prove_execution_stark,
-    prove_execution_stark_with_options, save_execution_stark_proof, verify_execution_stark,
-    VanillaStarkCostEstimate, VanillaStarkExecutionClaim, VanillaStarkExecutionProof,
-    VanillaStarkProofOptions,
+    prove_execution_stark_full, prove_execution_stark_with_options, save_execution_stark_proof,
+    verify_execution_stark, VanillaStarkCostEstimate, VanillaStarkExecutionClaim,
+    VanillaStarkExecutionProof, VanillaStarkProofOptions,
 };
 pub use runtime::ExecutionRuntime;
 pub use state::{decode_state, encode_state, MachineState, Word, MIN_D_MODEL, WORD_BITS};

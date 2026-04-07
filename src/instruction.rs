@@ -35,6 +35,16 @@ pub enum Instruction {
     JumpIfSign(u8),
     JumpIfNotSign(u8),
     Halt,
+    // Local variable slots (addresses 240–255)
+    GetLocal(u8),
+    SetLocal(u8),
+    // Structured loop constructs
+    Loop,
+    EndLoop,
+    BranchIfNotZero(u8),
+    // Externally-committed I/O buffer (addresses 224–239)
+    IRead(u8),
+    IWrite(u8),
 }
 
 impl Instruction {
@@ -68,6 +78,13 @@ impl Instruction {
             Instruction::JumpIfSign(_) => "JS",
             Instruction::JumpIfNotSign(_) => "JNS",
             Instruction::Halt => "HALT",
+            Instruction::GetLocal(_) => "GETLOCAL",
+            Instruction::SetLocal(_) => "SETLOCAL",
+            Instruction::Loop => "LOOP",
+            Instruction::EndLoop => "ENDLOOP",
+            Instruction::BranchIfNotZero(_) => "BRIF",
+            Instruction::IRead(_) => "IREAD",
+            Instruction::IWrite(_) => "IWRITE",
         }
     }
 
@@ -92,6 +109,9 @@ impl Instruction {
             Instruction::JumpIfNotSign(target) => {
                 Ok(Instruction::JumpIfNotSign(add_offset(target)?))
             }
+            Instruction::BranchIfNotZero(target) => {
+                Ok(Instruction::BranchIfNotZero(add_offset(target)?))
+            }
             other => Ok(other),
         }
     }
@@ -104,7 +124,9 @@ impl fmt::Display for Instruction {
             | Instruction::Push
             | Instruction::Pop
             | Instruction::Ret
-            | Instruction::Halt => f.write_str(self.mnemonic()),
+            | Instruction::Halt
+            | Instruction::Loop
+            | Instruction::EndLoop => f.write_str(self.mnemonic()),
             Instruction::LoadImmediate(value)
             | Instruction::AddImmediate(value)
             | Instruction::SubImmediate(value)
@@ -127,7 +149,12 @@ impl fmt::Display for Instruction {
             | Instruction::JumpIfZero(address)
             | Instruction::JumpIfNotZero(address)
             | Instruction::JumpIfSign(address)
-            | Instruction::JumpIfNotSign(address) => {
+            | Instruction::JumpIfNotSign(address)
+            | Instruction::GetLocal(address)
+            | Instruction::SetLocal(address)
+            | Instruction::BranchIfNotZero(address)
+            | Instruction::IRead(address)
+            | Instruction::IWrite(address) => {
                 write!(f, "{} {}", self.mnemonic(), address)
             }
         }

@@ -185,6 +185,49 @@ fn parse_instruction(
         "JS" => Instruction::JumpIfSign(parse_target(line, operands, labels)?),
         "JNS" => Instruction::JumpIfNotSign(parse_target(line, operands, labels)?),
         "HALT" => expect_arity(line, operands, 0).map(|_| Instruction::Halt)?,
+        "LOOP" => expect_arity(line, operands, 0).map(|_| Instruction::Loop)?,
+        "ENDLOOP" => expect_arity(line, operands, 0).map(|_| Instruction::EndLoop)?,
+        "BRIF" => Instruction::BranchIfNotZero(parse_target(line, operands, labels)?),
+        "GETLOCAL" => {
+            let slot = parse_u8_operand(line, operands)?;
+            if slot > 15 {
+                return Err(VmError::Parse {
+                    line,
+                    message: format!("local slot {slot} exceeds limit 15 (addresses 240..=255)"),
+                });
+            }
+            Instruction::GetLocal(slot)
+        }
+        "SETLOCAL" => {
+            let slot = parse_u8_operand(line, operands)?;
+            if slot > 15 {
+                return Err(VmError::Parse {
+                    line,
+                    message: format!("local slot {slot} exceeds limit 15 (addresses 240..=255)"),
+                });
+            }
+            Instruction::SetLocal(slot)
+        }
+        "IREAD" => {
+            let key = parse_u8_operand(line, operands)?;
+            if key > 15 {
+                return Err(VmError::Parse {
+                    line,
+                    message: format!("I/O key {key} exceeds limit 15 (addresses 224..=239)"),
+                });
+            }
+            Instruction::IRead(key)
+        }
+        "IWRITE" => {
+            let key = parse_u8_operand(line, operands)?;
+            if key > 15 {
+                return Err(VmError::Parse {
+                    line,
+                    message: format!("I/O key {key} exceeds limit 15 (addresses 224..=239)"),
+                });
+            }
+            Instruction::IWrite(key)
+        }
         _ => {
             return Err(VmError::Parse {
                 line,
