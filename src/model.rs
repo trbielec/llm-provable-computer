@@ -643,6 +643,21 @@ impl InstructionCompiler {
                 self.compile_jump_if_not_sign(instruction, target)
             }
             Instruction::Halt => self.compile_halt(instruction),
+            // New instructions: delegate to equivalent existing compiled forms.
+            Instruction::GetLocal(slot) => {
+                self.compile_load(Instruction::Load(240 + slot), 240 + slot)
+            }
+            Instruction::SetLocal(slot) => {
+                self.compile_store(Instruction::Store(240 + slot), 240 + slot)
+            }
+            Instruction::Loop | Instruction::EndLoop => self.compile_nop(instruction),
+            Instruction::BranchIfNotZero(target) => {
+                self.compile_jump_if_not_zero(instruction, target)
+            }
+            Instruction::IRead(key) => self.compile_load(Instruction::Load(224 + key), 224 + key),
+            Instruction::IWrite(key) => {
+                self.compile_store(Instruction::Store(224 + key), 224 + key)
+            }
         }
     }
 

@@ -1,9 +1,11 @@
+use serde::{Deserialize, Serialize};
+
 use crate::config::Attention2DMode;
 use crate::error::{Result, VmError};
 use crate::geometry::HullKvCache;
 use crate::state::Word;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AddressedMemory {
     cells: Vec<Word>,
     histories: Vec<HullKvCache>,
@@ -11,6 +13,18 @@ pub struct AddressedMemory {
 }
 
 impl AddressedMemory {
+    pub fn new(
+        cells: Vec<Word>,
+        histories: Vec<HullKvCache>,
+        exact_histories: Vec<Vec<Word>>,
+    ) -> Self {
+        Self {
+            cells,
+            histories,
+            exact_histories,
+        }
+    }
+
     pub fn from_initial(initial: &[Word]) -> Self {
         let mut histories = vec![HullKvCache::new(); initial.len()];
         let mut exact_histories = vec![Vec::new(); initial.len()];
@@ -23,6 +37,14 @@ impl AddressedMemory {
             histories,
             exact_histories,
         }
+    }
+
+    pub fn histories(&self) -> &[HullKvCache] {
+        &self.histories
+    }
+
+    pub fn exact_histories(&self) -> &[Vec<Word>] {
+        &self.exact_histories
     }
 
     pub fn len(&self) -> usize {

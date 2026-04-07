@@ -44,6 +44,7 @@ pub struct VanillaStarkExecutionClaim {
     pub program: Program,
     pub attention_mode: Attention2DMode,
     pub steps: usize,
+    pub initial_state: MachineState,
     pub final_state: MachineState,
     pub options: VanillaStarkProofOptions,
 }
@@ -115,12 +116,17 @@ impl ColumnLayout {
 struct VmAir {
     program: Program,
     layout: ColumnLayout,
+    attention_mode: Attention2DMode,
 }
 
 impl VmAir {
-    fn new(program: Program) -> Self {
+    fn new(program: Program, attention_mode: Attention2DMode) -> Self {
         let layout = ColumnLayout::new(program.memory_size());
-        Self { program, layout }
+        Self {
+            program,
+            layout,
+            attention_mode,
+        }
     }
 
     fn register_count(&self) -> usize {
@@ -139,13 +145,14 @@ impl VmAir {
 
     fn boundary_constraints(
         &self,
-        steps: usize,
-        final_state: &MachineState,
+        claim: &VanillaStarkExecutionClaim,
     ) -> Vec<(usize, usize, FieldElement)> {
         let mut boundary = Vec::new();
-        let initial = MachineState::with_memory(self.program.initial_memory().to_vec());
+        let steps = claim.steps;
+        let initial = &claim.initial_state;
+        let final_state = &claim.final_state;
 
-        for (register, value) in state_public_registers(&self.layout, &initial)
+        for (register, value) in state_public_registers(&self.layout, initial)
             .into_iter()
             .enumerate()
         {
@@ -206,6 +213,15 @@ impl VmAir {
         let current_stack_write_selectors = self.stack_write_selectors(&current_sp);
         let valid_pc = self.domain_zerofier(&current_pc, self.program.len());
         let valid_sp = self.domain_zerofier(&current_sp, self.layout.memory_size + 1);
+
+        // Operand bit integrity constraint: operand_bits must reconstruct to expected_operand_bit_sum.
+        let mut operand_bit_sum = MPolynomial::zero();
+        for (i, bit) in current_operand_bits.iter().enumerate().take(WORD_BITS - 1) {
+            operand_bit_sum = operand_bit_sum + bit.clone() * mp_constant(1i128 << i);
+        }
+        operand_bit_sum = operand_bit_sum
+            - current_operand_bits[WORD_BITS - 1].clone() * mp_constant(1i128 << (WORD_BITS - 1));
+
         let mut expected_next_pc = MPolynomial::zero();
         let mut expected_next_acc = MPolynomial::zero();
         let mut expected_next_sp = MPolynomial::zero();
@@ -217,6 +233,7 @@ impl VmAir {
         let mut pop_or_ret_selector = MPolynomial::zero();
 
         let pc_selectors = self.pc_selectors(&current_pc);
+        let is_normal_mode = matches!(self.attention_mode, Attention2DMode::AverageHard { query } if query == [1.0, 0.0]);
 
         for (pc, instruction) in self.program.instructions().iter().enumerate() {
             let selector = pc_selectors[pc].clone();
@@ -228,7 +245,7 @@ impl VmAir {
                     expected_next_acc = expected_next_acc + selector.clone() * current_acc.clone();
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
@@ -240,30 +257,36 @@ impl VmAir {
                         expected_next_acc + selector.clone() * mp_constant(i128::from(value));
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
                     }
                 }
                 Instruction::Load(address) => {
-                    let loaded = current_memory[address as usize].clone();
+                    let operand = if is_normal_mode {
+                        current_memory[address as usize].clone()
+                    } else {
+                        operand_bit_sum.clone()
+                    };
                     expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
-                    expected_next_acc = expected_next_acc + selector.clone() * loaded;
+                    expected_next_acc = expected_next_acc + selector.clone() * operand.clone();
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
                     }
+                    expected_operand_bit_sum =
+                        expected_operand_bit_sum + selector.clone() * operand;
                 }
                 Instruction::Store(address) => {
                     expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
                     expected_next_acc = expected_next_acc + selector.clone() * current_acc.clone();
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         let value = if index == address as usize {
                             current_acc.clone()
@@ -280,7 +303,7 @@ impl VmAir {
                     expected_next_sp =
                         expected_next_sp + selector.clone() * (current_sp.clone() - one.clone());
                     expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         let write_selector = current_stack_write_selectors[index].clone();
                         let value = write_selector.clone() * current_acc.clone()
@@ -290,17 +313,23 @@ impl VmAir {
                 }
                 Instruction::Pop => {
                     pop_or_ret_selector = pop_or_ret_selector + selector.clone();
+                    let operand = if is_normal_mode {
+                        current_stack_read.clone()
+                    } else {
+                        operand_bit_sum.clone()
+                    };
                     expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
-                    expected_next_acc =
-                        expected_next_acc + selector.clone() * current_stack_read.clone();
+                    expected_next_acc = expected_next_acc + selector.clone() * operand.clone();
                     expected_next_sp =
                         expected_next_sp + selector.clone() * (current_sp.clone() + one.clone());
                     expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
                     }
+                    expected_operand_bit_sum =
+                        expected_operand_bit_sum + selector.clone() * operand;
                 }
                 Instruction::AddImmediate(value) => {
                     let operand = mp_constant(i128::from(value));
@@ -312,27 +341,33 @@ impl VmAir {
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry =
                         expected_next_carry + selector.clone() * next_carry.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
                     }
                 }
                 Instruction::AddMemory(address) => {
-                    let operand = current_memory[address as usize].clone();
+                    let operand = if is_normal_mode {
+                        current_memory[address as usize].clone()
+                    } else {
+                        operand_bit_sum.clone()
+                    };
                     expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
                     expected_next_acc = expected_next_acc
                         + selector.clone()
-                            * (current_acc.clone() + operand
+                            * (current_acc.clone() + operand.clone()
                                 - next_carry.clone() * mp_constant(WORD_MODULUS));
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry =
                         expected_next_carry + selector.clone() * next_carry.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
                     }
+                    expected_operand_bit_sum =
+                        expected_operand_bit_sum + selector.clone() * operand;
                 }
                 Instruction::SubImmediate(value) => {
                     let operand = mp_constant(i128::from(value));
@@ -344,27 +379,33 @@ impl VmAir {
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry =
                         expected_next_carry + selector.clone() * next_carry.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
                     }
                 }
                 Instruction::SubMemory(address) => {
-                    let operand = current_memory[address as usize].clone();
+                    let operand = if is_normal_mode {
+                        current_memory[address as usize].clone()
+                    } else {
+                        operand_bit_sum.clone()
+                    };
                     expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
                     expected_next_acc = expected_next_acc
                         + selector.clone()
-                            * (current_acc.clone() - operand
+                            * (current_acc.clone() - operand.clone()
                                 + next_carry.clone() * mp_constant(WORD_MODULUS));
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry =
                         expected_next_carry + selector.clone() * next_carry.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
                     }
+                    expected_operand_bit_sum =
+                        expected_operand_bit_sum + selector.clone() * operand;
                 }
                 Instruction::MulImmediate(value) => {
                     expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
@@ -372,24 +413,30 @@ impl VmAir {
                         + selector.clone() * (current_acc.clone() * mp_constant(i128::from(value)));
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
                     }
                 }
                 Instruction::MulMemory(address) => {
-                    let rhs = current_memory[address as usize].clone();
+                    let operand = if is_normal_mode {
+                        current_memory[address as usize].clone()
+                    } else {
+                        operand_bit_sum.clone()
+                    };
                     expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
-                    expected_next_acc =
-                        expected_next_acc + selector.clone() * (current_acc.clone() * rhs);
+                    expected_next_acc = expected_next_acc
+                        + selector.clone() * (current_acc.clone() * operand.clone());
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
                     }
+                    expected_operand_bit_sum =
+                        expected_operand_bit_sum + selector.clone() * operand;
                 }
                 Instruction::CmpImmediate(value) => {
                     let operand = mp_constant(i128::from(value));
@@ -402,27 +449,33 @@ impl VmAir {
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry =
                         expected_next_carry + selector.clone() * next_carry.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
                     }
                 }
                 Instruction::CmpMemory(address) => {
-                    let operand = current_memory[address as usize].clone();
+                    let operand = if is_normal_mode {
+                        current_memory[address as usize].clone()
+                    } else {
+                        operand_bit_sum.clone()
+                    };
                     expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
                     expected_next_acc = expected_next_acc
                         + selector.clone()
-                            * (current_acc.clone() - operand
+                            * (current_acc.clone() - operand.clone()
                                 + next_carry.clone() * mp_constant(WORD_MODULUS));
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry =
                         expected_next_carry + selector.clone() * next_carry.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
                     }
+                    expected_operand_bit_sum =
+                        expected_operand_bit_sum + selector.clone() * operand;
                 }
                 Instruction::Call(target) => {
                     push_or_call_selector = push_or_call_selector + selector.clone();
@@ -432,7 +485,7 @@ impl VmAir {
                     expected_next_sp =
                         expected_next_sp + selector.clone() * (current_sp.clone() - one.clone());
                     expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         let write_selector = current_stack_write_selectors[index].clone();
                         let return_address = mp_constant(i128::from((pc as u8).wrapping_add(1)));
@@ -443,17 +496,23 @@ impl VmAir {
                 }
                 Instruction::Ret => {
                     pop_or_ret_selector = pop_or_ret_selector + selector.clone();
-                    expected_next_pc =
-                        expected_next_pc + selector.clone() * current_stack_read.clone();
+                    let operand = if is_normal_mode {
+                        current_stack_read.clone()
+                    } else {
+                        operand_bit_sum.clone()
+                    };
+                    expected_next_pc = expected_next_pc + selector.clone() * operand.clone();
                     expected_next_acc = expected_next_acc + selector.clone() * current_acc.clone();
                     expected_next_sp =
                         expected_next_sp + selector.clone() * (current_sp.clone() + one.clone());
                     expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
                     }
+                    expected_operand_bit_sum =
+                        expected_operand_bit_sum + selector.clone() * operand;
                 }
                 Instruction::Jump(target) => {
                     expected_next_pc =
@@ -461,7 +520,7 @@ impl VmAir {
                     expected_next_acc = expected_next_acc + selector.clone() * current_acc.clone();
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
@@ -474,7 +533,7 @@ impl VmAir {
                     expected_next_acc = expected_next_acc + selector.clone() * current_acc.clone();
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
@@ -487,7 +546,7 @@ impl VmAir {
                     expected_next_acc = expected_next_acc + selector.clone() * current_acc.clone();
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
@@ -500,7 +559,7 @@ impl VmAir {
                     expected_next_acc = expected_next_acc + selector.clone() * current_acc.clone();
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
@@ -513,7 +572,7 @@ impl VmAir {
                     expected_next_acc = expected_next_acc + selector.clone() * current_acc.clone();
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
@@ -531,6 +590,100 @@ impl VmAir {
                             + pc_selectors[pc].clone() * current_memory[index].clone();
                     }
                 }
+                Instruction::GetLocal(slot) => {
+                    let address = 240usize + slot as usize;
+                    let operand = if is_normal_mode {
+                        current_memory[address].clone()
+                    } else {
+                        operand_bit_sum.clone()
+                    };
+                    expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
+                    expected_next_acc = expected_next_acc + selector.clone() * operand.clone();
+                    expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
+                    expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
+                    for (index, expected) in expected_next_memory.iter_mut().enumerate() {
+                        *expected = expected.clone()
+                            + pc_selectors[pc].clone() * current_memory[index].clone();
+                    }
+                    expected_operand_bit_sum =
+                        expected_operand_bit_sum + selector.clone() * operand;
+                }
+                Instruction::SetLocal(slot) => {
+                    let address = 240usize + slot as usize;
+                    expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
+                    expected_next_acc = expected_next_acc + selector.clone() * current_acc.clone();
+                    expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
+                    expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
+                    for (index, expected) in expected_next_memory.iter_mut().enumerate() {
+                        let value = if index == address {
+                            current_acc.clone()
+                        } else {
+                            current_memory[index].clone()
+                        };
+                        *expected = expected.clone() + pc_selectors[pc].clone() * value;
+                    }
+                }
+                Instruction::Loop | Instruction::EndLoop => {
+                    expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
+                    expected_next_acc = expected_next_acc + selector.clone() * current_acc.clone();
+                    expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
+                    expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
+                    for (index, expected) in expected_next_memory.iter_mut().enumerate() {
+                        *expected = expected.clone()
+                            + pc_selectors[pc].clone() * current_memory[index].clone();
+                    }
+                }
+                Instruction::BranchIfNotZero(target) => {
+                    let target_expr = current_zero.clone() * next_pc_constant
+                        + (one.clone() - current_zero.clone()) * mp_constant(i128::from(target));
+                    expected_next_pc = expected_next_pc + selector.clone() * target_expr;
+                    expected_next_acc = expected_next_acc + selector.clone() * current_acc.clone();
+                    expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
+                    expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
+                    for (index, expected) in expected_next_memory.iter_mut().enumerate() {
+                        *expected = expected.clone()
+                            + pc_selectors[pc].clone() * current_memory[index].clone();
+                    }
+                }
+                Instruction::IRead(key) => {
+                    let address = 224usize + key as usize;
+                    let operand = if is_normal_mode {
+                        current_memory[address].clone()
+                    } else {
+                        operand_bit_sum.clone()
+                    };
+                    expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
+                    expected_next_acc = expected_next_acc + selector.clone() * operand.clone();
+                    expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
+                    expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
+                    for (index, expected) in expected_next_memory.iter_mut().enumerate() {
+                        *expected = expected.clone()
+                            + pc_selectors[pc].clone() * current_memory[index].clone();
+                    }
+                    expected_operand_bit_sum =
+                        expected_operand_bit_sum + selector.clone() * operand;
+                }
+                Instruction::IWrite(key) => {
+                    let address = 224usize + key as usize;
+                    expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
+                    expected_next_acc = expected_next_acc + selector.clone() * current_acc.clone();
+                    expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
+                    expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
+                    for (index, expected) in expected_next_memory.iter_mut().enumerate() {
+                        let value = if index == address {
+                            current_acc.clone()
+                        } else {
+                            current_memory[index].clone()
+                        };
+                        *expected = expected.clone() + pc_selectors[pc].clone() * value;
+                    }
+                }
                 Instruction::AndImmediate(value) => {
                     let operand = mp_constant(i128::from(value));
                     expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
@@ -546,14 +699,18 @@ impl VmAir {
                         expected_next_acc + selector.clone() * bitwise_result_sum(&result_bits);
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
                     }
                 }
                 Instruction::AndMemory(address) => {
-                    let operand = current_memory[address as usize].clone();
+                    let operand = if is_normal_mode {
+                        current_memory[address as usize].clone()
+                    } else {
+                        operand_bit_sum.clone()
+                    };
                     expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
                     expected_operand_bit_sum =
                         expected_operand_bit_sum + selector.clone() * operand;
@@ -566,7 +723,7 @@ impl VmAir {
                         expected_next_acc + selector.clone() * bitwise_result_sum(&result_bits);
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
@@ -589,14 +746,18 @@ impl VmAir {
                         expected_next_acc + selector.clone() * bitwise_result_sum(&result_bits);
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
                     }
                 }
                 Instruction::OrMemory(address) => {
-                    let operand = current_memory[address as usize].clone();
+                    let operand = if is_normal_mode {
+                        current_memory[address as usize].clone()
+                    } else {
+                        operand_bit_sum.clone()
+                    };
                     expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
                     expected_operand_bit_sum =
                         expected_operand_bit_sum + selector.clone() * operand;
@@ -611,7 +772,7 @@ impl VmAir {
                         expected_next_acc + selector.clone() * bitwise_result_sum(&result_bits);
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
@@ -636,14 +797,18 @@ impl VmAir {
                         expected_next_acc + selector.clone() * bitwise_result_sum(&result_bits);
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
                     }
                 }
                 Instruction::XorMemory(address) => {
-                    let operand = current_memory[address as usize].clone();
+                    let operand = if is_normal_mode {
+                        current_memory[address as usize].clone()
+                    } else {
+                        operand_bit_sum.clone()
+                    };
                     expected_next_pc = expected_next_pc + selector.clone() * next_pc_constant;
                     expected_operand_bit_sum =
                         expected_operand_bit_sum + selector.clone() * operand;
@@ -660,7 +825,7 @@ impl VmAir {
                         expected_next_acc + selector.clone() * bitwise_result_sum(&result_bits);
                     expected_next_sp = expected_next_sp + selector.clone() * current_sp.clone();
                     expected_next_carry = expected_next_carry + selector.clone() * zero.clone();
-                    expected_next_halted = expected_next_halted + selector * zero.clone();
+                    expected_next_halted = expected_next_halted + selector.clone() * zero.clone();
                     for (index, expected) in expected_next_memory.iter_mut().enumerate() {
                         *expected = expected.clone()
                             + pc_selectors[pc].clone() * current_memory[index].clone();
@@ -697,7 +862,7 @@ impl VmAir {
         // Bit integrity constraint for signed two's-complement ACC.
         let mut bit_sum = MPolynomial::zero();
         for (i, bit) in current_acc_bits.iter().enumerate().take(WORD_BITS - 1) {
-            bit_sum = bit_sum + bit.clone() * mp_constant(1 << i);
+            bit_sum = bit_sum + bit.clone() * mp_constant(1i128 << i);
         }
         bit_sum = bit_sum
             - current_acc_bits[WORD_BITS - 1].clone() * mp_constant(1i128 << (WORD_BITS - 1));
@@ -706,7 +871,7 @@ impl VmAir {
         // Operand bit integrity constraint: operand_bits must reconstruct to expected_operand_bit_sum.
         let mut operand_bit_sum = MPolynomial::zero();
         for (i, bit) in current_operand_bits.iter().enumerate().take(WORD_BITS - 1) {
-            operand_bit_sum = operand_bit_sum + bit.clone() * mp_constant(1 << i);
+            operand_bit_sum = operand_bit_sum + bit.clone() * mp_constant(1i128 << i);
         }
         operand_bit_sum = operand_bit_sum
             - current_operand_bits[WORD_BITS - 1].clone() * mp_constant(1i128 << (WORD_BITS - 1));
@@ -783,7 +948,10 @@ pub fn verify_execution_stark(proof: &VanillaStarkExecutionProof) -> Result<bool
         ));
     }
 
-    let air = VmAir::new(proof.claim.program.clone());
+    let air = VmAir::new(
+        proof.claim.program.clone(),
+        proof.claim.attention_mode.clone(),
+    );
     let stark = Stark::new(
         proof.claim.options.expansion_factor,
         proof.claim.options.num_colinearity_checks,
@@ -793,11 +961,13 @@ pub fn verify_execution_stark(proof: &VanillaStarkExecutionProof) -> Result<bool
         air.transition_degree_bound(),
     );
 
-    Ok(stark.verify(
+    let is_valid = stark.verify(
         &proof.proof,
         &air.transition_constraints(),
-        &air.boundary_constraints(proof.claim.steps, &proof.claim.final_state),
-    ))
+        &air.boundary_constraints(&proof.claim),
+    );
+
+    Ok(is_valid)
 }
 
 pub fn serialize_execution_stark_proof_json(proof: &VanillaStarkExecutionProof) -> Result<Vec<u8>> {
@@ -921,7 +1091,7 @@ fn lagrange_selector(variable: &MPolynomial, domain: &[i128], point: i128) -> MP
 fn bitwise_result_sum(result_bits: &[MPolynomial]) -> MPolynomial {
     let mut sum = MPolynomial::zero();
     for (i, bit) in result_bits.iter().enumerate().take(WORD_BITS - 1) {
-        sum = sum + bit.clone() * mp_constant(1 << i);
+        sum = sum + bit.clone() * mp_constant(1i128 << i);
     }
     sum - result_bits[WORD_BITS - 1].clone() * mp_constant(1i128 << (WORD_BITS - 1))
 }

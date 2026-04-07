@@ -2262,6 +2262,10 @@ fn instruction_mood(instruction: Instruction) -> &'static str {
         | Instruction::JumpIfNotSign(_) => "branch work with a dramatic turn",
         Instruction::Halt => "the finale lands and holds",
         Instruction::Nop => "holding the pose without drift",
+        Instruction::GetLocal(_) | Instruction::SetLocal(_) => "local slots exchanging values",
+        Instruction::Loop | Instruction::EndLoop => "loop boundary marking the beat",
+        Instruction::BranchIfNotZero(_) => "conditional leap at the loop turn",
+        Instruction::IRead(_) | Instruction::IWrite(_) => "I/O buffer threading through",
     }
 }
 

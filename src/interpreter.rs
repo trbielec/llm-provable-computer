@@ -55,6 +55,17 @@ impl NativeInterpreter {
         max_steps: usize,
     ) -> Self {
         let memory = AddressedMemory::from_initial(&initial_state.memory);
+        Self::new_with_memory(program, attention_mode, memory, initial_state, max_steps)
+    }
+
+    /// Create an interpreter seeded with an explicit [`AddressedMemory`].
+    pub fn new_with_memory(
+        program: Program,
+        attention_mode: Attention2DMode,
+        memory: AddressedMemory,
+        initial_state: MachineState,
+        max_steps: usize,
+    ) -> Self {
         Self {
             program,
             attention_mode,
@@ -77,7 +88,7 @@ impl NativeInterpreter {
         validate_stack_precondition(instruction, self.state.sp, self.memory.len())?;
 
         let before = self.state.clone();
-        let after = self.execute_instruction(instruction)?;
+        let (after, operand) = self.execute_instruction(instruction)?;
         self.state = after;
         self.step_count += 1;
         record_execution_step(
@@ -88,6 +99,7 @@ impl NativeInterpreter {
             instruction,
             before,
             &self.state,
+            operand,
         );
 
         Ok(&self.state)
@@ -155,9 +167,13 @@ impl NativeInterpreter {
         Ok(address)
     }
 
-    fn execute_instruction(&mut self, instruction: Instruction) -> Result<MachineState> {
+    fn execute_instruction(
+        &mut self,
+        instruction: Instruction,
+    ) -> Result<(MachineState, Option<Word>)> {
         let next_pc = self.state.pc.wrapping_add(1);
         let mut next_state = self.state.clone();
+        let mut operand = None;
 
         match instruction {
             Instruction::Nop => advance(&mut next_state, next_pc),
@@ -166,6 +182,7 @@ impl NativeInterpreter {
             }
             Instruction::Load(address) => {
                 let value = self.read_memory(address)?;
+                operand = Some(value);
                 advance_with_acc(&mut next_state, next_pc, i128::from(value), false);
             }
             Instruction::Store(address) => {
@@ -179,6 +196,7 @@ impl NativeInterpreter {
             }
             Instruction::Pop => {
                 let value = self.read_stack_top()?;
+                operand = Some(value);
                 advance_with_acc(&mut next_state, next_pc, i128::from(value), false);
                 next_state.sp = self.state.sp.saturating_add(1);
             }
@@ -188,6 +206,7 @@ impl NativeInterpreter {
             }
             Instruction::AddMemory(address) => {
                 let rhs = self.read_memory(address)?;
+                operand = Some(rhs);
                 let raw = i128::from(self.state.acc) + i128::from(rhs);
                 advance_with_acc(&mut next_state, next_pc, raw, overflowed(raw));
             }
@@ -197,6 +216,7 @@ impl NativeInterpreter {
             }
             Instruction::SubMemory(address) => {
                 let rhs = self.read_memory(address)?;
+                operand = Some(rhs);
                 let raw = i128::from(self.state.acc) - i128::from(rhs);
                 advance_with_acc(&mut next_state, next_pc, raw, overflowed(raw));
             }
@@ -206,6 +226,7 @@ impl NativeInterpreter {
             }
             Instruction::MulMemory(address) => {
                 let rhs = self.read_memory(address)?;
+                operand = Some(rhs);
                 let raw = i128::from(self.state.acc) * i128::from(rhs);
                 advance_with_acc(&mut next_state, next_pc, raw, overflowed(raw));
             }
@@ -215,6 +236,7 @@ impl NativeInterpreter {
             }
             Instruction::AndMemory(address) => {
                 let rhs = self.read_memory(address)?;
+                operand = Some(rhs);
                 let raw = i128::from(self.state.acc & rhs);
                 advance_with_acc(&mut next_state, next_pc, raw, false);
             }
@@ -224,6 +246,7 @@ impl NativeInterpreter {
             }
             Instruction::OrMemory(address) => {
                 let rhs = self.read_memory(address)?;
+                operand = Some(rhs);
                 let raw = i128::from(self.state.acc | rhs);
                 advance_with_acc(&mut next_state, next_pc, raw, false);
             }
@@ -233,6 +256,7 @@ impl NativeInterpreter {
             }
             Instruction::XorMemory(address) => {
                 let rhs = self.read_memory(address)?;
+                operand = Some(rhs);
                 let raw = i128::from(self.state.acc ^ rhs);
                 advance_with_acc(&mut next_state, next_pc, raw, false);
             }
@@ -242,6 +266,7 @@ impl NativeInterpreter {
             }
             Instruction::CmpMemory(address) => {
                 let rhs = self.read_memory(address)?;
+                operand = Some(rhs);
                 let raw = i128::from(self.state.acc) - i128::from(rhs);
                 advance_with_acc(&mut next_state, next_pc, raw, self.state.acc < rhs);
             }
@@ -252,6 +277,7 @@ impl NativeInterpreter {
             }
             Instruction::Ret => {
                 let value = self.read_stack_top()?;
+                operand = Some(value);
                 next_state.pc = checked_transition_u8("pc", value)?;
                 next_state.sp = self.state.sp.saturating_add(1);
                 next_state.halted = false;
@@ -282,11 +308,43 @@ impl NativeInterpreter {
                 if self.state.acc < 0 { next_pc } else { target },
             ),
             Instruction::Halt => next_state.halted = true,
+            Instruction::GetLocal(slot) => {
+                let address = 240u8 + slot;
+                let value = self.read_memory(address)?;
+                operand = Some(value);
+                advance_with_acc(&mut next_state, next_pc, i128::from(value), false);
+            }
+            Instruction::SetLocal(slot) => {
+                let address = 240u8 + slot;
+                self.write_memory(address, self.state.acc)?;
+                advance(&mut next_state, next_pc);
+            }
+            Instruction::Loop => advance(&mut next_state, next_pc),
+            Instruction::EndLoop => advance(&mut next_state, next_pc),
+            Instruction::BranchIfNotZero(target) => jump(
+                &mut next_state,
+                if self.state.zero_flag {
+                    next_pc
+                } else {
+                    target
+                },
+            ),
+            Instruction::IRead(key) => {
+                let address = 224u8 + key;
+                let value = self.read_memory(address)?;
+                operand = Some(value);
+                advance_with_acc(&mut next_state, next_pc, i128::from(value), false);
+            }
+            Instruction::IWrite(key) => {
+                let address = 224u8 + key;
+                self.write_memory(address, self.state.acc)?;
+                advance(&mut next_state, next_pc);
+            }
         }
 
         validate_stack_pointer(next_state.sp, self.memory.len())?;
         next_state.memory = self.memory.snapshot();
-        Ok(next_state)
+        Ok((next_state, operand))
     }
 }
 
